@@ -5,6 +5,7 @@ from models.schemas import (
     SupervisorResponse,
     TopicPreferences,
     TopicPreferencesResponse,
+    WebSearchDecision,
 )
 from models.state import OnboardingState
 
@@ -15,5 +16,6 @@ __all__ = [
     "PersonalInformation",
     "TopicPreferences",
     "StateUpdate",
+    "WebSearchDecision",
     "OnboardingState",
 ]

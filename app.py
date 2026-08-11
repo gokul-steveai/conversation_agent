@@ -45,4 +45,5 @@ if user_prompt:
         st.session_state.messages.append(tool_log)
 
     st.session_state.messages.append({"role": "assistant", "content": agent_reply})
+    SessionManager.save_current_session()
     st.rerun()

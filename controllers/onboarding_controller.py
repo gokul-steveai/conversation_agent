@@ -15,9 +15,11 @@ from models.schemas import (
     PersonalInformationResponse,
     StateUpdate,
     TopicPreferencesResponse,
+    WebSearchDecision,
 )
 from services.profile_service import ProfileService
 from services.search_service import SearchService
+from tools.tavily_search import search_web_information
 from utils.sanitizer import sanitize_response
 
 
@@ -171,9 +173,44 @@ class OnboardingController:
         elif current_agent == NODE_ENGAGEMENT:
             await cls._sync_state_refinement(history_messages, state)
 
+            loc = state.get("location", "")
+            topics = state.get("topic_preferences", [])
+            topics_str = ", ".join(topics) if topics else ""
+
+            search_evaluator = llm.with_structured_output(WebSearchDecision)
+            decision: WebSearchDecision = await search_evaluator.ainvoke(
+                [
+                    SystemMessage(
+                        f"You are evaluating if customer '{state.get('name')}' (from '{loc}') needs a live web search to answer their prompt.\n"
+                        f"Customer prompt: '{user_text}'"
+                    )
+                ]
+            )
+
+            if decision.needs_web_search and decision.search_query:
+                query_str = decision.search_query.strip()
+                tool_logs.append(
+                    {
+                        "role": "tool",
+                        "content": f"🔍 [Tavily Search] Agent autonomously executing web search: '{query_str}'...",
+                    }
+                )
+                search_data = search_web_information.invoke({"query": query_str})
+
+                synthesis_prompt = SystemMessage(
+                    f"You are an enthusiastic customer engagement agent talking to '{state.get('name')}' from '{loc}'.\n"
+                    f"Customer Interests: {topics_str}.\n"
+                    f"Live Web Search Results for '{query_str}':\n{search_data}\n\n"
+                    "Synthesize a warm, detailed, accurate response directly based on the search results."
+                )
+                res = await llm.ainvoke([synthesis_prompt] + history_messages)
+                clean_reply = sanitize_response(res.content)
+                history_messages.append(AIMessage(clean_reply))
+                return clean_reply, tool_logs
+
             sys_prompt = SystemMessage(
-                f"You are an enthusiastic customer engagement agent talking to '{state.get('name')}' from '{state.get('location')}'.\n"
-                f"Interests: {', '.join(state.get('topic_preferences', []))}.\n"
+                f"You are an enthusiastic customer engagement agent talking to '{state.get('name')}' from '{loc}'.\n"
+                f"Customer Interests: {topics_str}.\n"
                 "Answer any follow-up questions warmly and concisely."
             )
             res = await llm.ainvoke([sys_prompt] + history_messages)

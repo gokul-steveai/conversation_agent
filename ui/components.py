@@ -1,9 +1,11 @@
+import asyncio
 import os
 
 import streamlit as st
 
 from config.constants import NODE_ENGAGEMENT, NODE_PERSONAL_INFO, NODE_TOPIC_PREF
 from config.settings import settings
+from services.session_service import SessionService
 from ui.session import SessionManager
 
 
@@ -111,6 +113,42 @@ class UIComponents:
         with st.sidebar:
             st.title("⚡ Multi-Agent Control")
 
+            st.markdown("### 📜 Session History")
+            col_new, col_del = st.columns([3, 1])
+            if col_new.button("➕ New Session", width="stretch"):
+                SessionManager.create_new_session()
+                st.rerun()
+
+            if col_del.button("🗑️", help="Delete active session"):
+                SessionManager.delete_current_session()
+                st.rerun()
+
+            sessions = asyncio.run(SessionService.list_sessions())
+            if sessions:
+                session_options = {
+                    s["session_id"]: f"📌 {s['title']} ({s['updated_at'][11:16]})"
+                    for s in sessions
+                }
+                current_id = st.session_state.get("current_session_id")
+                option_ids = list(session_options.keys())
+                curr_idx = (
+                    option_ids.index(current_id) if current_id in option_ids else 0
+                )
+
+                selected_id = st.selectbox(
+                    "Select Conversation Session:",
+                    options=option_ids,
+                    format_func=lambda sid: session_options[sid],
+                    index=curr_idx,
+                    key="session_select_box",
+                )
+
+                if selected_id and selected_id != current_id:
+                    SessionManager.switch_session(selected_id)
+                    st.rerun()
+
+            st.markdown("---")
+
             agent_display = (
                 st.session_state.state["current_agent"].replace("_", " ").title()
             )
@@ -151,8 +189,8 @@ class UIComponents:
                 f"Search API: **Tavily ({'Connected' if settings.tavily_api_key else 'Fallback Mode'})**"
             )
 
-            if st.button("🔄 Reset Onboarding Session", width="stretch"):
-                SessionManager.reset_session()
+            if st.button("🔄 Reset Current Session", width="stretch"):
+                SessionManager.create_new_session()
                 st.rerun()
 
             if os.path.exists("onboarding.png"):

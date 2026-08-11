@@ -13,6 +13,11 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     )
     tavily_api_key: str = Field(default_factory=lambda: os.getenv("TAVILY_API_KEY", ""))
+    database_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "DATABASE_URL", "sqlite:///data/conversations.db"
+        )
+    )
     default_temperature: float = 0.0
 
 
