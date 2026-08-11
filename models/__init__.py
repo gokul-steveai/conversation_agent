@@ -1,21 +1,5 @@
-from models.schemas import (
-    PersonalInformation,
-    PersonalInformationResponse,
-    StateUpdate,
-    SupervisorResponse,
-    TopicPreferences,
-    TopicPreferencesResponse,
-    WebSearchDecision,
-)
-from models.state import OnboardingState
+from .base import Base
+from .session import SessionModel
+from .user import UserModel
 
-__all__ = [
-    "SupervisorResponse",
-    "PersonalInformationResponse",
-    "TopicPreferencesResponse",
-    "PersonalInformation",
-    "TopicPreferences",
-    "StateUpdate",
-    "WebSearchDecision",
-    "OnboardingState",
-]
+__all__ = ["Base", "UserModel", "SessionModel"]

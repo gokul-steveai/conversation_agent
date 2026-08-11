@@ -1,10 +1,10 @@
-import asyncio
-
 import streamlit as st
 
 from controllers.onboarding_controller import OnboardingController
+from ui.auth_ui import AuthUI
 from ui.components import UIComponents
 from ui.session import SessionManager
+from utils.async_runner import run_async
 
 # Page Configuration
 st.set_page_config(
@@ -14,11 +14,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Initialize Custom Theme & Session State
 UIComponents.render_custom_styles()
+
+# Authentication Guard
+if not AuthUI.is_authenticated():
+    AuthUI.render_auth_page()
+    st.stop()
+
 SessionManager.init_session()
 
-# Render Sidebar & Header Components
 UIComponents.render_sidebar()
 UIComponents.render_header()
 
@@ -33,7 +37,7 @@ if user_prompt:
     st.session_state.messages.append({"role": "user", "content": user_prompt})
 
     with st.spinner("⚡ Agent reasoning & routing..."):
-        agent_reply, tool_logs = asyncio.run(
+        agent_reply, tool_logs = run_async(
             OnboardingController.process_step(
                 user_text=user_prompt,
                 state=st.session_state.state,

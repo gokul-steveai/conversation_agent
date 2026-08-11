@@ -1,4 +1,3 @@
-import asyncio
 import os
 
 import streamlit as st
@@ -113,6 +112,17 @@ class UIComponents:
         with st.sidebar:
             st.title("⚡ Multi-Agent Control")
 
+            # Authenticated User Account Profile
+            user_name = st.session_state.get("user_name", "User")
+            user_email = st.session_state.get("user_email", "")
+            st.markdown(f"👤 **Account:** `{user_name}`  \n📧 `{user_email}`")
+            from ui.auth_ui import AuthUI
+
+            if st.button("🚪 Sign Out", width="stretch"):
+                AuthUI.logout()
+
+            st.markdown("---")
+
             st.markdown("### 📜 Session History")
             col_new, col_del = st.columns([3, 1])
             if col_new.button("➕ New Session", width="stretch"):
@@ -123,10 +133,13 @@ class UIComponents:
                 SessionManager.delete_current_session()
                 st.rerun()
 
-            sessions = asyncio.run(SessionService.list_sessions())
+            from utils.async_runner import run_async
+
+            user_id = SessionManager.get_current_user_id()
+            sessions = run_async(SessionService.list_sessions(user_id))
             if sessions:
                 session_options = {
-                    s["session_id"]: f"📌 {s['title']} ({s['updated_at'][11:16]})"
+                    s.session_id: f"📌 {s.title} ({s.updated_at[11:16]})"
                     for s in sessions
                 }
                 current_id = st.session_state.get("current_session_id")
@@ -207,10 +220,10 @@ class UIComponents:
         if current_agent == NODE_PERSONAL_INFO:
             if cols[0].button("📍 Why do you need my location?"):
                 return "Why do you need my location?"
-            if cols[1].button("👋 I am Ayush from Bangalore"):
-                return "I am Ayush from Bangalore"
-            if cols[2].button("👤 Hi, I am Gokul from Dhar"):
-                return "Hi, I am Gokul from Dhar"
+            if cols[1].button("👋 I am John from Bangalore"):
+                return "I am John from Bangalore"
+            if cols[2].button("👤 Hi, I am Adam from Dhar"):
+                return "Hi, I am Adam from Dhar"
         elif current_agent == NODE_TOPIC_PREF:
             if cols[0].button("💡 What topic options do I have?"):
                 return "What topic options do I have?"

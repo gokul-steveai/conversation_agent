@@ -9,7 +9,7 @@ An enterprise-grade, distributed multi-agent onboarding platform built with **La
 - **Supervisor Router Orchestration**: LangGraph state graph with dynamic supervisor routing between specialized onboarding agents.
 - **Autonomous Agentic Web Search**: On-demand Tavily web search integration fetching real-time facts, news updates, and location highlights.
 - **Enterprise Multi-Session Memory (PostgreSQL & SQLite)**: Persistent session state storage built with SQLAlchemy ORM, supporting **PostgreSQL as Primary Storage** with automatic **SQLite Fallback** (`data/conversations.db`).
-- **Strict Session Isolation & Resumption**: Each session maintains isolated profile states, UI chat history, and LangChain message memory—allowing users to resume conversations seamlessly right where they left off.
+- **Authenticated Owner-Scoped Session Isolation**: Every session operation (`create`, `load`, `list`, `save`, `delete`) is strictly scoped to an authenticated `user_id` / `owner_id` entity, preventing cross-user data leakage and enforcing multi-tenant isolation.
 - **SOLID & DRY Architecture**: Decoupled repository pattern (`repositories/`), domain service layer (`services/`), ORM entities (`models/`), orchestration controllers (`controllers/`), and presentation layer (`ui/`).
 - **Streamlit Glassmorphism UI**: Interactive sidebar session switcher, new session creation, quick suggestions, onboarding progress bar, and real-time tool execution logs.
 

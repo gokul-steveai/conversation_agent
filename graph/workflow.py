@@ -16,7 +16,7 @@ from config.constants import (
     NODE_TOPIC_PREF,
 )
 from graph.router import route_supervisor
-from models.state import OnboardingState
+from schemas.state import OnboardingState
 
 
 def build_graph() -> CompiledStateGraph[

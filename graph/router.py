@@ -1,7 +1,7 @@
 from langgraph.graph import END
 
 from config.constants import NODE_ENGAGEMENT, NODE_PERSONAL_INFO, NODE_TOPIC_PREF
-from models.state import OnboardingState
+from schemas.state import OnboardingState
 
 
 def route_supervisor(state: OnboardingState) -> str:

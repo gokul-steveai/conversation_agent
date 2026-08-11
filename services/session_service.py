@@ -1,9 +1,14 @@
 import json
 import uuid
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Union
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    SystemMessage,
+    messages_from_dict,
+    messages_to_dict,
+)
 
 from config.constants import (
     DEFAULT_GREETING,
@@ -11,39 +16,51 @@ from config.constants import (
     SYSTEM_PROMPT_PERSONAL_INFO,
 )
 from repositories.session_repository import SessionRepository
+from repositories.user_repository import UserRepository
+from schemas.session import (
+    CreateSessionRequest,
+    SaveSessionRequest,
+    SessionDetailResponse,
+    SessionResponse,
+)
 from utils.logger import logger
 
 
 class SessionService:
-    """Domain Service owning Async Session lifecycle management, validation, and domain logic."""
-
     @classmethod
     def serialize_messages(cls, messages: List[BaseMessage]) -> str:
-        serialized = []
-        for msg in messages:
-            if isinstance(msg, SystemMessage):
-                serialized.append({"type": "system", "content": msg.content})
-            elif isinstance(msg, HumanMessage):
-                serialized.append({"type": "human", "content": msg.content})
-            elif isinstance(msg, AIMessage):
-                serialized.append({"type": "ai", "content": msg.content})
-        return json.dumps(serialized)
+        """Serializes complete LangChain BaseMessage objects into JSON preserving tool_calls, IDs, and metadata."""
+        message_dicts = messages_to_dict(messages)
+        return json.dumps(message_dicts)
 
     @classmethod
     def deserialize_messages(cls, json_str: str) -> List[BaseMessage]:
+        """Deserializes JSON string into LangChain BaseMessage objects, with seamless migration for legacy {type, content} records."""
         try:
             data = json.loads(json_str)
-            messages = []
-            for item in data:
-                m_type = item.get("type")
-                content = item.get("content", "")
-                if m_type == "system":
-                    messages.append(SystemMessage(content))
-                elif m_type == "human":
-                    messages.append(HumanMessage(content))
-                elif m_type == "ai":
-                    messages.append(AIMessage(content))
-            return messages
+            if not isinstance(data, list) or not data:
+                return []
+
+            first = data[0]
+            # Detect legacy format: {"type": "human", "content": "..."} lacking LangChain's "data" sub-dict
+            if isinstance(first, dict) and "data" not in first and "content" in first:
+                migrated_dicts = []
+                for item in data:
+                    m_type = item.get("type", "human")
+                    content = item.get("content", "")
+                    migrated_dicts.append(
+                        {
+                            "type": m_type,
+                            "data": {
+                                "content": content,
+                                "additional_kwargs": {},
+                                "response_metadata": {},
+                            },
+                        }
+                    )
+                return messages_from_dict(migrated_dicts)
+
+            return messages_from_dict(data)
         except Exception as e:
             logger.error(f"Error deserializing history messages: {e}")
             return []
@@ -60,10 +77,24 @@ class SessionService:
 
     @classmethod
     async def create_session(
-        cls, title: str = "New Onboarding Session"
-    ) -> Tuple[str, Dict[str, Any], List[Dict[str, Any]], List[BaseMessage]]:
+        cls,
+        request_or_user_id: Union[CreateSessionRequest, str],
+        title: str = "New Onboarding Session",
+    ) -> SessionDetailResponse:
+        if isinstance(request_or_user_id, CreateSessionRequest):
+            user_id = request_or_user_id.user_id
+            session_title = request_or_user_id.title
+        else:
+            user_id = request_or_user_id
+            session_title = title
+
+        if not user_id:
+            raise ValueError("user_id must be provided to create a session.")
+
+        # Ensure owner user record exists for FK integrity
+        await UserRepository.get_or_create_user(user_id=user_id)
+
         session_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
 
         initial_state = {
             "name": "",
@@ -81,67 +112,95 @@ class SessionService:
 
         await SessionRepository.save_entity(
             session_id=session_id,
-            title=title,
+            user_id=user_id,
+            title=session_title,
             state_json=json.dumps(initial_state),
             messages_json=json.dumps(initial_messages),
             history_json=cls.serialize_messages(initial_history),
-            created_at=now,
-            updated_at=now,
         )
-        return session_id, initial_state, initial_messages, initial_history
+
+        return SessionDetailResponse(
+            session_id=session_id,
+            user_id=user_id,
+            title=session_title,
+            state=initial_state,
+            messages=initial_messages,
+            history_messages=initial_history,
+        )
 
     @classmethod
-    async def save_session(
-        cls,
-        session_id: str,
-        state: Dict[str, Any],
-        messages: List[Dict[str, Any]],
-        history_messages: List[BaseMessage],
-    ) -> None:
-        now = datetime.now().isoformat()
-        title = cls.format_title(state, session_id)
-        state_json = json.dumps(state)
-        messages_json = json.dumps(messages)
-        history_json = cls.serialize_messages(history_messages)
+    async def save_session(cls, request: SaveSessionRequest) -> None:
+        if not request.user_id:
+            raise ValueError("user_id must be provided to save a session.")
 
-        existing = await SessionRepository.find_by_id(session_id)
-        created_at = existing.created_at if existing else now
+        title = cls.format_title(request.state, request.session_id)
+        state_json = json.dumps(request.state)
+        messages_json = json.dumps(request.messages)
+        history_json = cls.serialize_messages(request.history_messages)
 
         await SessionRepository.save_entity(
-            session_id=session_id,
+            session_id=request.session_id,
+            user_id=request.user_id,
             title=title,
             state_json=state_json,
             messages_json=messages_json,
             history_json=history_json,
-            created_at=created_at,
-            updated_at=now,
         )
 
     @classmethod
     async def load_session(
-        cls, session_id: str
-    ) -> Optional[Tuple[Dict[str, Any], List[Dict[str, Any]], List[BaseMessage]]]:
-        row = await SessionRepository.find_by_id(session_id)
+        cls, session_id: str, user_id: str
+    ) -> Optional[SessionDetailResponse]:
+        if not user_id:
+            raise ValueError("user_id must be provided to load a session.")
+
+        row = await SessionRepository.find_by_id(session_id, user_id)
         if row:
             state = json.loads(row.state_json)
             messages = json.loads(row.messages_json)
             history_messages = cls.deserialize_messages(row.history_json)
-            return state, messages, history_messages
+            return SessionDetailResponse(
+                session_id=row.session_id,
+                user_id=row.user_id,
+                title=row.title,
+                state=state,
+                messages=messages,
+                history_messages=history_messages,
+            )
         return None
 
     @classmethod
-    async def list_sessions(cls) -> List[Dict[str, Any]]:
-        rows = await SessionRepository.find_all()
-        return [
-            {
-                "session_id": row.session_id,
-                "title": row.title,
-                "created_at": row.created_at,
-                "updated_at": row.updated_at,
-            }
-            for row in rows
-        ]
+    async def list_sessions(cls, user_id: str) -> List[SessionResponse]:
+        if not user_id:
+            raise ValueError("user_id must be provided to list sessions.")
+
+        rows = await SessionRepository.find_all_by_user(user_id)
+        sessions = []
+        for row in rows:
+            created_str = (
+                row.created_at.isoformat()
+                if hasattr(row.created_at, "isoformat")
+                else str(row.created_at)
+            )
+            updated_str = (
+                row.updated_at.isoformat()
+                if hasattr(row.updated_at, "isoformat")
+                else str(row.updated_at)
+            )
+            sessions.append(
+                SessionResponse(
+                    session_id=row.session_id,
+                    user_id=row.user_id,
+                    title=row.title,
+                    created_at=created_str,
+                    updated_at=updated_str,
+                )
+            )
+        return sessions
 
     @classmethod
-    async def delete_session(cls, session_id: str) -> None:
-        await SessionRepository.delete_by_id(session_id)
+    async def delete_session(cls, session_id: str, user_id: str) -> None:
+        if not user_id:
+            raise ValueError("user_id must be provided to delete a session.")
+
+        await SessionRepository.delete_by_id(session_id, user_id)

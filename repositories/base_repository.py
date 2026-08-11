@@ -18,3 +18,7 @@ class IBaseRepository(ABC, Generic[T]):
     @abstractmethod
     async def delete_by_id(self, entity_id: str) -> None:
         pass
+
+    @abstractmethod
+    async def create_entity(self, entity: T) -> None:
+        pass

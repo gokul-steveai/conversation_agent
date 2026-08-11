@@ -9,14 +9,14 @@ def search_web_information(query: str) -> str:
     """Performs a live web search using Tavily API to retrieve real-time news, current events, local facts, history, weather, or detailed information.
 
     Use this tool whenever:
-    - The customer asks questions requiring real-time, live, or up-to-date facts (e.g. news, events, local landmarks, places to visit).
+    - The customer asks questions requiring real-time, live, or up-to-date facts (e.g. news, events, weather, local landmarks, places to visit).
     - The customer requests more details about a city, history, culture, sports, or technology that you need to search on the web.
     - You need external web verification or additional context to answer the user's question accurately.
 
     Args:
-        query: The specific web search query string (e.g. 'latest tech events in Bhopal', 'famous places in Dhar').
+        query: The specific web search query string (e.g. 'latest tech events in Bhopal', 'current weather in Tokyo').
     """
-    return SearchService.search_location_facts(query)
+    return SearchService.search_general(query)
 
 
 def search_location_facts(location: str) -> str:
