@@ -2,8 +2,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from config.constants import DEFAULT_GREETING, SYSTEM_PROMPT_PERSONAL_INFO
 from core.llm_factory import llm
-from models.schemas import PersonalInformationResponse
-from models.state import OnboardingState
+from schemas.schemas import PersonalInformationResponse
+from schemas.state import OnboardingState
 from utils.console import ConsoleUI
 
 

@@ -61,3 +61,13 @@ class StateUpdate(BaseModel):
         default_factory=list,
         description="All topics/interests identified or confirmed in conversation",
     )
+
+
+class WebSearchDecision(BaseModel):
+    needs_web_search: bool = Field(
+        description="True if customer's prompt asks for live information, news, facts, landmarks, weather, or specific details requiring web search"
+    )
+    search_query: Optional[str] = Field(
+        default=None,
+        description="The specific web search query string if search is needed (e.g. 'Dhar fossil park information', 'latest tech news')",
+    )

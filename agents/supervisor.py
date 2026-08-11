@@ -7,8 +7,8 @@ from config.constants import (
     NODE_TOPIC_PREF,
 )
 from core.llm_factory import llm
-from models.schemas import SupervisorResponse
-from models.state import OnboardingState
+from schemas.schemas import SupervisorResponse
+from schemas.state import OnboardingState
 
 
 async def supervisor_agent(state: OnboardingState):

@@ -2,7 +2,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from config.constants import EXIT_KEYWORDS, SYSTEM_PROMPT_ENGAGEMENT_TEMPLATE
 from core.llm_factory import llm
-from models.state import OnboardingState
+from schemas.state import OnboardingState
 from services.profile_service import ProfileService
 from services.search_service import SearchService
 from utils.console import ConsoleUI

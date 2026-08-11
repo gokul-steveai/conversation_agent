@@ -4,6 +4,7 @@ import streamlit as st
 
 from config.constants import NODE_ENGAGEMENT, NODE_PERSONAL_INFO, NODE_TOPIC_PREF
 from config.settings import settings
+from services.session_service import SessionService
 from ui.session import SessionManager
 
 
@@ -111,6 +112,56 @@ class UIComponents:
         with st.sidebar:
             st.title("⚡ Multi-Agent Control")
 
+            # Authenticated User Account Profile
+            user_name = st.session_state.get("user_name", "User")
+            user_email = st.session_state.get("user_email", "")
+            st.markdown(f"👤 **Account:** `{user_name}`  \n📧 `{user_email}`")
+            from ui.auth_ui import AuthUI
+
+            if st.button("🚪 Sign Out", width="stretch"):
+                AuthUI.logout()
+
+            st.markdown("---")
+
+            st.markdown("### 📜 Session History")
+            col_new, col_del = st.columns([3, 1])
+            if col_new.button("➕ New Session", width="stretch"):
+                SessionManager.create_new_session()
+                st.rerun()
+
+            if col_del.button("🗑️", help="Delete active session"):
+                SessionManager.delete_current_session()
+                st.rerun()
+
+            from utils.async_runner import run_async
+
+            user_id = SessionManager.get_current_user_id()
+            sessions = run_async(SessionService.list_sessions(user_id))
+            if sessions:
+                session_options = {
+                    s.session_id: f"📌 {s.title} ({s.updated_at[11:16]})"
+                    for s in sessions
+                }
+                current_id = st.session_state.get("current_session_id")
+                option_ids = list(session_options.keys())
+                curr_idx = (
+                    option_ids.index(current_id) if current_id in option_ids else 0
+                )
+
+                selected_id = st.selectbox(
+                    "Select Conversation Session:",
+                    options=option_ids,
+                    format_func=lambda sid: session_options[sid],
+                    index=curr_idx,
+                    key="session_select_box",
+                )
+
+                if selected_id and selected_id != current_id:
+                    SessionManager.switch_session(selected_id)
+                    st.rerun()
+
+            st.markdown("---")
+
             agent_display = (
                 st.session_state.state["current_agent"].replace("_", " ").title()
             )
@@ -151,8 +202,8 @@ class UIComponents:
                 f"Search API: **Tavily ({'Connected' if settings.tavily_api_key else 'Fallback Mode'})**"
             )
 
-            if st.button("🔄 Reset Onboarding Session", width="stretch"):
-                SessionManager.reset_session()
+            if st.button("🔄 Reset Current Session", width="stretch"):
+                SessionManager.create_new_session()
                 st.rerun()
 
             if os.path.exists("onboarding.png"):
@@ -169,10 +220,10 @@ class UIComponents:
         if current_agent == NODE_PERSONAL_INFO:
             if cols[0].button("📍 Why do you need my location?"):
                 return "Why do you need my location?"
-            if cols[1].button("👋 I am Ayush from Bangalore"):
-                return "I am Ayush from Bangalore"
-            if cols[2].button("👤 Hi, I am Gokul from Dhar"):
-                return "Hi, I am Gokul from Dhar"
+            if cols[1].button("👋 I am John from Bangalore"):
+                return "I am John from Bangalore"
+            if cols[2].button("👤 Hi, I am Adam from Dhar"):
+                return "Hi, I am Adam from Dhar"
         elif current_agent == NODE_TOPIC_PREF:
             if cols[0].button("💡 What topic options do I have?"):
                 return "What topic options do I have?"

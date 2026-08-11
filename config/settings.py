@@ -13,6 +13,18 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     )
     tavily_api_key: str = Field(default_factory=lambda: os.getenv("TAVILY_API_KEY", ""))
+    database_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "DATABASE_URL", "sqlite:///data/conversations.db"
+        )
+    )
+    jwt_secret_key: str = Field(
+        default_factory=lambda: os.getenv(
+            "JWT_SECRET_KEY", "super-secret-production-jwt-key-2026-secure"
+        )
+    )
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_minutes: int = 1440  # 24 Hours
     default_temperature: float = 0.0
 
 

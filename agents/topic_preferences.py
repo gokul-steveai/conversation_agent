@@ -5,8 +5,8 @@ from config.constants import (
     SYSTEM_PROMPT_TOPIC_PREF_TEMPLATE,
 )
 from core.llm_factory import llm
-from models.schemas import TopicPreferencesResponse
-from models.state import OnboardingState
+from schemas.schemas import TopicPreferencesResponse
+from schemas.state import OnboardingState
 from utils.console import ConsoleUI
 
 
