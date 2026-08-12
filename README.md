@@ -1,137 +1,136 @@
-# 🚀 Autonomous Multi-Agent Onboarding Assistant
+# 🚀 AI Chat Assistant (FastAPI + Streamlit)
 
-An enterprise-grade, distributed multi-agent onboarding platform built with **LangGraph**, **Groq LLM (`llama-3.3-70b-versatile`)**, **SQLAlchemy ORM (PostgreSQL & SQLite)**, **Tavily Live Web Search**, and a **Streamlit Glassmorphism UI**.
+An enterprise-grade **AI Chat Application** built with **FastAPI REST Backend**, **Groq LLM (`llama-3.3-70b-versatile`)**, **SQLAlchemy Async ORM (PostgreSQL & SQLite)**, **Tavily Real-Time Web Search**, and a **Streamlit Glassmorphism UI Client**.
 
 ---
 
 ## 🌟 Key Features
 
-- **Supervisor Router Orchestration**: LangGraph state graph with dynamic supervisor routing between specialized onboarding agents.
-- **Autonomous Agentic Web Search**: On-demand Tavily web search integration fetching real-time facts, news updates, and location highlights.
-- **Enterprise Multi-Session Memory (PostgreSQL & SQLite)**: Persistent session state storage built with SQLAlchemy ORM, supporting **PostgreSQL as Primary Storage** with automatic **SQLite Fallback** (`data/conversations.db`).
-- **Authenticated Owner-Scoped Session Isolation**: Every session operation (`create`, `load`, `list`, `save`, `delete`) is strictly scoped to an authenticated `user_id` / `owner_id` entity, preventing cross-user data leakage and enforcing multi-tenant isolation.
-- **SOLID & DRY Architecture**: Decoupled repository pattern (`repositories/`), domain service layer (`services/`), ORM entities (`models/`), orchestration controllers (`controllers/`), and presentation layer (`ui/`).
-- **Streamlit Glassmorphism UI**: Interactive sidebar session switcher, new session creation, quick suggestions, onboarding progress bar, and real-time tool execution logs.
+- **Open Conversational AI**: Ask any question immediately from message #1—coding, live web search, weather, local facts, creative writing, or general Q&A.
+
+- **Real-Time Token Streaming**: Real-time typewriter token streaming on the UI using Server-Sent Events (SSE) and `st.write_stream(...)`.
+- **FastAPI REST Backend API**: Decoupled backend server handling JWT Authentication (`/api/v1/auth`), Sessions (`/api/v1/sessions`), and Streaming Chat (`/api/v1/chat`).
+- **Autonomous Agentic Web Search**: On-demand Tavily web search integration fetching live facts, news updates, and real-time information.
+- **Autonomous Context Reasoning**: Detects missing parameters (such as missing location for local weather) and asks friendly clarification questions before acting.
+- **Enterprise Repository Pattern & Database Pooling**: Async SQLAlchemy ORM using `AsyncAdaptedQueuePool` (PostgreSQL) and `NullPool` (SQLite).
+- **Clean Architecture & SOLID Principles**: Decoupled packages for `prompts/`, `tools/`, `controllers/`, `services/`, `repositories/`, `api/`, and `ui/`.
 
 ---
 
 ## 🏗️ System Architecture
 
-![System Architecture Map](onboarding.png)
-
 ```mermaid
 flowchart TD
-    User["User Input"] --> App["Streamlit Web App (app.py)"]
-    App --> UI["Presentation & Session Adapter (ui/)"]
-    App --> Controller["Orchestration Controller (controllers/onboarding_controller.py)"]
+    User["User Input"] --> Streamlit["Streamlit Glassmorphism UI (app.py)"]
+    Streamlit --> APIClient["HTTP API Client (ui/api_client.py)"]
     
-    Controller --> StateRefiner["State Extractor (StateUpdate)"]
-    StateRefiner --> SessionSvc["Session Service (services/session_service.py)"]
+    APIClient --> FastAPIServer["FastAPI REST Server (main.py)"]
+    FastAPIServer --> AuthRouter["Auth Router (api/v1/auth.py)"]
+    FastAPIServer --> SessionRouter["Session Router (api/v1/sessions.py)"]
+    FastAPIServer --> ChatRouter["Chat SSE Router (api/v1/chat.py)"]
     
-    SessionSvc --> SessionRepo["Session Repository (repositories/session_repository.py)"]
-    SessionRepo --> Database[("PostgreSQL Primary / SQLite Fallback")]
+    ChatRouter --> ChatController["Chat Controller (controllers/chat_controller.py)"]
+    ChatController --> LLMFactory["Groq LLM Factory (core/llm_factory.py)"]
+    ChatController --> SearchService["Tavily Search Service (services/search_service.py)"]
     
-    Controller --> Graph["LangGraph Orchestrator (graph/workflow.py)"]
-    Graph --> Supervisor["Supervisor Router Agent (agents/supervisor.py)"]
-    
-    Supervisor --> AgentPI["Personal Info Agent"]
-    Supervisor --> AgentTP["Topic Preferences Agent"]
-    Supervisor --> AgentCE["Customer Engagement Agent"]
-    
-    AgentCE --> SearchTool["Tavily Web Search Tool (tools/tavily_search.py)"]
-    AgentCE --> ProfileService["Profile Persistence Service (services/profile_service.py)"]
+    ChatRouter --> SessionService["Session Service (services/session_service.py)"]
+    SessionService --> SessionRepo["Session Repository (repositories/session_repository.py)"]
+    SessionRepo --> Database[("PostgreSQL / SQLite Database")]
 ```
 
 ---
 
-## 📁 Distributed Project Directory Structure
+## 📁 Project Directory Structure
 
 ```text
 conversation_agent/
 ├── app.py                      # Streamlit UI composition root
-├── main.py                     # CLI terminal application entrypoint
+├── main.py                     # FastAPI application entrypoint
 ├── pyproject.toml              # UV dependency definition & Ruff linter settings
 ├── .env.example                # Public environment configuration template
-├── config/                     # Centralized settings & prompt constants
+├── api/                        # FastAPI REST Route Handlers
+│   ├── deps.py                 # Dependency injection & JWT guard
+│   └── v1/                     # Versioned API routes (auth, sessions, chat)
+├── config/                     # Centralized settings & constants
 │   ├── settings.py             # Environment settings loader
-│   └── constants.py            # Prompt templates & node constants
-├── core/                       # LLM Provider Factory
+│   └── constants.py            # App titles & node constants
+├── core/                       # Core Infrastructure
+│   ├── database.py             # SQLAlchemy Async Engine & Session Manager
 │   └── llm_factory.py          # Groq Chat model instance
-├── models/                     # Domain Schemas & Database ORM Models
-│   ├── db_models.py            # SQLAlchemy SessionModel ORM entity
-│   ├── schemas.py              # Pydantic structured output models
-│   └── state.py                # LangGraph OnboardingState definition
-├── repositories/               # Enterprise Repository Data Access Layer
-│   ├── base_repository.py      # IBaseRepository abstract contract (SOLID)
-│   └── session_repository.py   # SQLAlchemy session database CRUD implementation
-├── services/                   # Business Logic Services
-│   ├── session_service.py      # Session lifecycle & domain logic
-│   ├── memory_service.py       # Memory facade wrapper
+├── controllers/                # Chat Orchestration Controllers
+│   └── chat_controller.py      # Prompt evaluation, search, & reply flow
+├── models/                     # Database ORM Entities
+│   ├── user.py                 # UserModel ORM entity
+│   └── session.py              # SessionModel ORM entity
+├── prompts/                    # Dedicated System & Evaluation Prompts
+│   ├── system_prompts.py       # Assistant system prompts
+│   └── eval_prompts.py         # Search evaluation & synthesis prompts
+├── repositories/               # Repository Data Access Layer (SOLID)
+│   ├── base_repository.py      # Abstract repository contract
+│   ├── user_repository.py      # User CRUD operations
+│   └── session_repository.py   # Owner-scoped session CRUD operations
+├── schemas/                    # Pydantic Request/Response Models
+│   ├── auth.py                 # Auth schemas
+│   ├── session.py              # Session schemas
+│   └── schemas.py              # Chat decision & message schemas
+├── services/                   # Core Business Logic Services
+│   ├── auth_service.py         # JWT generation & password hashing
+│   ├── session_service.py      # Session domain operations
 │   ├── search_service.py       # Tavily Web Search API client
 │   └── profile_service.py      # Profile persistence service
-├── agents/                     # Specialized LangGraph Agent Nodes
-│   ├── supervisor.py           # Routing supervisor
-│   ├── personal_information.py # Personal details agent
-│   ├── topic_preferences.py    # Topic preference agent
-│   └── customer_engagement.py # Final engagement agent
-├── graph/                      # LangGraph Workflow & Router
-│   ├── workflow.py             # StateGraph definition
-│   └── router.py               # Supervisor conditional router
-├── tools/                      # Agent Tooling
-│   └── tavily_search.py        # search_web_information @tool definition
-├── ui/                         # Streamlit UI & Session Manager
-│   ├── components.py           # Glassmorphism UI components & controls
-│   └── session.py              # UI Session state adapter
-└── utils/                      # Utilities
+├── tools/                      # Dedicated Agent Tooling
+│   ├── tavily_search.py        # Tavily search tools
+│   └── profile_tools.py       # Profile persistence tools
+├── ui/                         # Streamlit UI & Client Adapters
+│   ├── api_client.py           # Production HTTP Client with connection pooling
+│   ├── auth_ui.py              # Authentication UI forms
+│   ├── components.py           # Custom Glassmorphism UI components
+│   └── session.py              # Session state manager
+└── utils/                      # Helper Utilities
     ├── logger.py               # Centralized logger
-    ├── console.py              # CLI Console UI formatter
     └── sanitizer.py            # Response regex sanitizer
-```
-
----
-
-## ⚙️ Environment Setup & Configuration
-
-### 1. Requirements & Prerequisites
-- Python `3.13+`
-- [`uv`](https://github.com/astral-sh/uv) package manager
-
-### 2. Environment Variables Setup
-Copy `.env.example` to `.env`:
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your API keys:
-```env
-# Groq LLM Configuration
-GROQ_API_KEY=gsk_your_groq_api_key_here
-GROQ_MODEL=llama-3.3-70b-versatile
-
-# Tavily Web Search API
-TAVILY_API_KEY=tvly-your_tavily_api_key_here
-
-# Database URL (PostgreSQL Primary with automatic SQLite Fallback)
-DATABASE_URL=sqlite:///data/conversations.db
-# For PostgreSQL: postgresql://username:password@localhost:5432/conversation_agent
 ```
 
 ---
 
 ## 🚀 Running the Application
 
-### Launch Streamlit Web Interface
+### 1. Launch FastAPI Backend Server (Terminal 1)
+```bash
+uv run uvicorn main:app --reload --port 8000
+```
+👉 Backend API running at **[http://localhost:8000](http://localhost:8000)**  
+👉 Interactive Swagger Docs at **[http://localhost:8000/docs](http://localhost:8000/docs)**
+
+### 2. Launch Streamlit Web UI Client (Terminal 2)
 ```bash
 uv run streamlit run app.py
 ```
-👉 Open your browser at **[http://localhost:8501](http://localhost:8501)**
+👉 Web UI running at **[http://localhost:8501](http://localhost:8501)**
 
-### Launch CLI Terminal Interface
+---
+
+## ⚙️ Environment Configuration
+
+Copy `.env.example` to `.env`:
 ```bash
-uv run main.py
+cp .env.example .env
 ```
 
-### Code Formatting & Quality Auditing (Ruff)
+Configure `.env` keys:
+```env
+GROQ_API_KEY=gsk_your_groq_api_key_here
+GROQ_MODEL=llama-3.3-70b-versatile
+TAVILY_API_KEY=tvly-your_tavily_api_key_here
+DATABASE_URL=sqlite:///data/conversations.db
+JWT_SECRET_KEY=super-secret-production-jwt-key-2026-secure
+```
+
+---
+
+## 🧪 Code Quality & Auditing
+
+Run Ruff linter and code formatter:
 ```bash
 uv run ruff check . --fix
 uv run ruff format .

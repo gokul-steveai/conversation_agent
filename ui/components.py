@@ -1,16 +1,16 @@
-import os
+import html
 
 import streamlit as st
 
-from config.constants import NODE_ENGAGEMENT, NODE_PERSONAL_INFO, NODE_TOPIC_PREF
-from config.settings import settings
-from services.session_service import SessionService
+from config.constants import APP_SUBTITLE, APP_TITLE
+from ui.api_client import APIClient
 from ui.session import SessionManager
 
 
 class UIComponents:
     @staticmethod
     def render_custom_styles():
+        """Renders CSS styles for glassmorphism layout, badges, buttons, and dark typography."""
         st.markdown(
             """
         <style>
@@ -52,28 +52,6 @@ class UIComponents:
                 color: #e0e7ff;
             }
 
-            .agent-badge {
-                background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-                color: #ffffff;
-                padding: 6px 14px;
-                border-radius: 20px;
-                font-weight: 600;
-                font-size: 0.85rem;
-                display: inline-block;
-                box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
-            }
-
-            .topic-pill {
-                background: rgba(99, 102, 241, 0.15);
-                border: 1px solid rgba(99, 102, 241, 0.3);
-                color: #a5b4fc;
-                padding: 4px 12px;
-                border-radius: 14px;
-                font-size: 0.82rem;
-                display: inline-block;
-                margin: 2px 4px 2px 0;
-            }
-
             .stButton > button {
                 background: rgba(30, 41, 59, 0.6) !important;
                 border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -96,11 +74,11 @@ class UIComponents:
     @staticmethod
     def render_header():
         st.markdown(
-            """
+            f"""
         <div class="header-container">
-            <h2 style="margin:0; font-size: 1.6rem; color:#f8fafc;">🚀 Autonomous Multi-Agent Onboarding</h2>
+            <h2 style="margin:0; font-size: 1.6rem; color:#f8fafc;">🚀 {APP_TITLE}</h2>
             <p style="margin: 4px 0 0 0; color:#94a3b8; font-size:0.92rem;">
-                Powered by LangGraph Supervisor Routing, Groq LLM & Real-Time Tavily Web Search
+                {APP_SUBTITLE}
             </p>
         </div>
         """,
@@ -108,149 +86,99 @@ class UIComponents:
         )
 
     @staticmethod
+    def _render_sidebar_account():
+        user_name = st.session_state.get("user_name", "User")
+        user_email = st.session_state.get("user_email", "")
+        st.markdown(f"👤 **Account:** `{user_name}`  \n📧 `{user_email}`")
+
+        from ui.auth_ui import AuthUI
+
+        if st.button("🚪 Sign Out", use_container_width=True):
+            AuthUI.logout()
+
+    @staticmethod
+    def _render_sidebar_session_history():
+        """Renders active session selector and controls."""
+        st.markdown("### 📜 Session History")
+        col_new, col_del = st.columns([3, 1])
+
+        if col_new.button("➕ New Session", use_container_width=True):
+            SessionManager.create_new_session()
+            st.rerun()
+
+        if col_del.button("🗑️", help="Delete active session"):
+            SessionManager.delete_current_session()
+            st.rerun()
+
+        user_id = SessionManager.get_current_user_id()
+        sessions = APIClient.list_sessions(user_id)
+        if sessions:
+            session_options = {
+                s[
+                    "session_id"
+                ]: f"📌 {s['title']} ({s['updated_at'][11:16] if 'updated_at' in s else 'recent'})"
+                for s in sessions
+            }
+            current_id = st.session_state.get("current_session_id")
+            option_ids = list(session_options.keys())
+
+            if current_id not in option_ids and option_ids:
+                current_id = option_ids[0]
+                st.session_state.current_session_id = current_id
+
+            curr_idx = option_ids.index(current_id) if current_id in option_ids else 0
+
+            def handle_session_change():
+                selected_id = st.session_state.get("session_selector_widget")
+                if selected_id:
+                    SessionManager.switch_session(selected_id)
+
+            st.selectbox(
+                "Select Conversation Session:",
+                options=option_ids,
+                format_func=lambda sid: session_options[sid],
+                index=curr_idx,
+                key="session_selector_widget",
+                on_change=handle_session_change,
+            )
+
+    @staticmethod
     def render_sidebar():
         with st.sidebar:
-            st.title("⚡ Multi-Agent Control")
-
-            # Authenticated User Account Profile
-            user_name = st.session_state.get("user_name", "User")
-            user_email = st.session_state.get("user_email", "")
-            st.markdown(f"👤 **Account:** `{user_name}`  \n📧 `{user_email}`")
-            from ui.auth_ui import AuthUI
-
-            if st.button("🚪 Sign Out", width="stretch"):
-                AuthUI.logout()
-
+            st.title("⚡ AI Chat Control")
+            UIComponents._render_sidebar_account()
             st.markdown("---")
-
-            st.markdown("### 📜 Session History")
-            col_new, col_del = st.columns([3, 1])
-            if col_new.button("➕ New Session", width="stretch"):
-                SessionManager.create_new_session()
-                st.rerun()
-
-            if col_del.button("🗑️", help="Delete active session"):
-                SessionManager.delete_current_session()
-                st.rerun()
-
-            from utils.async_runner import run_async
-
-            user_id = SessionManager.get_current_user_id()
-            sessions = run_async(SessionService.list_sessions(user_id))
-            if sessions:
-                session_options = {
-                    s.session_id: f"📌 {s.title} ({s.updated_at[11:16]})"
-                    for s in sessions
-                }
-                current_id = st.session_state.get("current_session_id")
-                option_ids = list(session_options.keys())
-                curr_idx = (
-                    option_ids.index(current_id) if current_id in option_ids else 0
-                )
-
-                selected_id = st.selectbox(
-                    "Select Conversation Session:",
-                    options=option_ids,
-                    format_func=lambda sid: session_options[sid],
-                    index=curr_idx,
-                    key="session_select_box",
-                )
-
-                if selected_id and selected_id != current_id:
-                    SessionManager.switch_session(selected_id)
-                    st.rerun()
-
-            st.markdown("---")
-
-            agent_display = (
-                st.session_state.state["current_agent"].replace("_", " ").title()
-            )
-            st.markdown(
-                f"Active Agent: <span class='agent-badge'>🤖 {agent_display}</span>",
-                unsafe_allow_html=True,
-            )
-
-            progress_val = SessionManager.get_progress()
-            st.markdown("### 📊 Onboarding Progress")
-            st.progress(progress_val / 100.0)
-            st.caption(f"Completion: **{progress_val}%**")
-
-            st.markdown("---")
-            st.subheader("📋 Collected Profile Data")
-
-            s = st.session_state.state
-            st.markdown(f"👤 **Name:** `{s['name'] or 'Waiting...'}`")
-            st.markdown(f"📍 **Location:** `{s['location'] or 'Waiting...'}`")
-
-            if s["topic_preferences"]:
-                st.markdown("🏷️ **Topics:**")
-                pills_html = "".join(
-                    [
-                        f"<span class='topic-pill'>{t}</span>"
-                        for t in s["topic_preferences"]
-                    ]
-                )
-                st.markdown(pills_html, unsafe_allow_html=True)
-            else:
-                st.markdown("🏷️ **Topics:** `Waiting...` ")
-
-            st.markdown("---")
-
-            st.subheader("⚙️ System Status")
-            st.caption(f"LLM Provider: **Groq ({settings.groq_model})**")
-            st.caption(
-                f"Search API: **Tavily ({'Connected' if settings.tavily_api_key else 'Fallback Mode'})**"
-            )
-
-            if st.button("🔄 Reset Current Session", width="stretch"):
-                SessionManager.create_new_session()
-                st.rerun()
-
-            if os.path.exists("onboarding.png"):
-                st.markdown("---")
-                with st.expander("🔍 Architecture Graph Map"):
-                    st.image("onboarding.png", width="stretch")
+            UIComponents._render_sidebar_session_history()
 
     @staticmethod
     def render_quick_actions() -> str | None:
-        st.markdown("##### 💡 Suggested Responses:")
+        st.markdown("##### 💡 Suggested Prompts:")
         cols = st.columns(3)
-        current_agent = st.session_state.state["current_agent"]
 
-        if current_agent == NODE_PERSONAL_INFO:
-            if cols[0].button("📍 Why do you need my location?"):
-                return "Why do you need my location?"
-            if cols[1].button("👋 I am John from Bangalore"):
-                return "I am John from Bangalore"
-            if cols[2].button("👤 Hi, I am Adam from Dhar"):
-                return "Hi, I am Adam from Dhar"
-        elif current_agent == NODE_TOPIC_PREF:
-            if cols[0].button("💡 What topic options do I have?"):
-                return "What topic options do I have?"
-            if cols[1].button("🚀 AI, Tech, and Space Science"):
-                return "I am interested in AI, Technology, and Space Science"
-            if cols[2].button("⚽ Sports, Travel, and Finance"):
-                return "I love Sports, Travelling, and Finance"
-        elif current_agent == NODE_ENGAGEMENT:
-            if cols[0].button("✨ Tell me more about local tech facts!"):
-                return "Tell me more about local tech facts!"
-            if cols[1].button("📰 Any latest news in AI today?"):
-                return "Any latest news in AI today?"
-            if cols[2].button("✅ All good, thanks!"):
-                return "All good, thanks!"
+        if cols[0].button("🔍 Latest AI & Tech News", use_container_width=True):
+            return (
+                "What are the latest trending news stories in AI and technology today?"
+            )
+        if cols[1].button("🌤️ Weather & Local Facts", use_container_width=True):
+            return "Tell me the local weather and interesting facts about my current location!"
+        if cols[2].button("💻 Python Async Code Example", use_container_width=True):
+            return "Explain Python asyncio and write a code example using async/await."
         return None
 
     @staticmethod
     def render_chat_messages():
-        for msg in st.session_state.messages:
-            if msg["role"] == "assistant":
+        for msg in st.session_state.get("messages", []):
+            role = msg.get("role")
+            content = msg.get("content", "")
+            if role == "assistant":
                 with st.chat_message("assistant", avatar="🤖"):
-                    st.markdown(msg["content"])
-            elif msg["role"] == "user":
+                    st.markdown(content)
+            elif role == "user":
                 with st.chat_message("user", avatar="👤"):
-                    st.markdown(msg["content"])
-            elif msg["role"] == "tool":
+                    st.markdown(content)
+            elif role == "tool":
+                escaped_content = html.escape(content)
                 st.markdown(
-                    f"<div class='tool-card'>{msg['content']}</div>",
+                    f"<div class='tool-card'>{escaped_content}</div>",
                     unsafe_allow_html=True,
                 )

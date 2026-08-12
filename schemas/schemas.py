@@ -1,51 +1,6 @@
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
-
-
-class SupervisorResponse(BaseModel):
-    next_node: Literal[
-        "personal_information", "topic_preferences", "customer_engagement", "FINISH"
-    ] = Field(
-        description="The next specialized agent node to execute based on current state and user intent"
-    )
-    reason: str = Field(description="Explanation for why this route was selected")
-
-
-class PersonalInformationResponse(BaseModel):
-    name: Optional[str] = Field(
-        default=None, description="Customer's name if identified from conversation"
-    )
-    location: Optional[str] = Field(
-        default=None, description="Customer's location if identified from conversation"
-    )
-    is_complete: bool = Field(
-        description="True ONLY if BOTH name and location are successfully identified"
-    )
-    agent_response: str = Field(
-        description="Friendly, natural response to print to the customer, answering their questions or asking for missing info"
-    )
-
-
-class TopicPreferencesResponse(BaseModel):
-    topics: List[str] = Field(
-        default_factory=list, description="Topics/interests extracted from conversation"
-    )
-    is_complete: bool = Field(
-        description="True if customer has specified at least one interest or topic"
-    )
-    agent_response: str = Field(
-        description="Friendly response to print to the customer acknowledging their choices or suggesting categories"
-    )
-
-
-class PersonalInformation(BaseModel):
-    name: str = Field(description="Customer's name")
-    location: str = Field(description="Customer's location")
-
-
-class TopicPreferences(BaseModel):
-    topics: list[str] = Field(description="Topics the customer is interested in")
 
 
 class StateUpdate(BaseModel):
@@ -55,7 +10,7 @@ class StateUpdate(BaseModel):
     )
     location: Optional[str] = Field(
         default=None,
-        description="Most specific, refined city or location confirmed in conversation. If a vague nickname like 'city of lakes' was later clarified or confirmed to be 'Bhopal', extract the refined city name 'Bhopal'.",
+        description="Most specific, refined city or location explicitly declared by user in conversation.",
     )
     topics: List[str] = Field(
         default_factory=list,
@@ -63,11 +18,52 @@ class StateUpdate(BaseModel):
     )
 
 
-class WebSearchDecision(BaseModel):
+class ChatDecision(BaseModel):
+    needs_clarification: bool = Field(
+        default=False,
+        description="True if the user prompt is missing essential context or parameters (e.g. location for local weather/news when location is missing, dates, specific entity) required to answer accurately.",
+    )
+    clarification_question: Optional[str] = Field(
+        default=None,
+        description="The polite, friendly clarification question to ask the user if essential context is missing.",
+    )
     needs_web_search: bool = Field(
-        description="True if customer's prompt asks for live information, news, facts, landmarks, weather, or specific details requiring web search"
+        default=False,
+        description="True if prompt needs real-time web search for facts, news, weather, or current events",
     )
     search_query: Optional[str] = Field(
-        default=None,
-        description="The specific web search query string if search is needed (e.g. 'Dhar fossil park information', 'latest tech news')",
+        default=None, description="The refined query string for Tavily search if needed"
     )
+    extracted_name: Optional[str] = Field(
+        default=None, description="User name mentioned in prompt if any"
+    )
+    query_location: Optional[str] = Field(
+        default=None,
+        description="Target location requested for search/weather/news query (e.g., 'Tokyo' in 'weather in Tokyo')",
+    )
+    declared_user_location: Optional[str] = Field(
+        default=None,
+        description="User home/current location explicitly declared by user (e.g., 'I live in Paris', 'My location is London')",
+    )
+    extracted_topics: List[str] = Field(
+        default_factory=list, description="Topics/interests mentioned in prompt if any"
+    )
+
+
+class ChatMessageRequest(BaseModel):
+    user_text: str = Field(description="The input text message from user")
+    session_id: str = Field(description="Active session ID")
+    state: dict = Field(default_factory=dict, description="Current chat state dict")
+
+
+class ToolLogItem(BaseModel):
+    role: str = Field(default="tool")
+    content: str = Field(description="Log message string")
+
+
+class ChatMessageResponse(BaseModel):
+    reply: str = Field(description="AI Assistant response reply")
+    tool_logs: List[ToolLogItem] = Field(
+        default_factory=list, description="Tool execution log messages"
+    )
+    updated_state: dict = Field(description="Updated session state dict")

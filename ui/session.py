@@ -1,9 +1,6 @@
 import streamlit as st
 
-from config.constants import NODE_ENGAGEMENT, NODE_PERSONAL_INFO, NODE_TOPIC_PREF
-from schemas.session import CreateSessionRequest, SaveSessionRequest
-from services.session_service import SessionService
-from utils.async_runner import run_async
+from ui.api_client import APIClient
 
 
 class SessionManager:
@@ -16,78 +13,94 @@ class SessionManager:
     @staticmethod
     def init_session() -> None:
         user_id = SessionManager.get_current_user_id()
+        user_name = st.session_state.get("user_name", "")
+
         if "current_session_id" not in st.session_state:
-            sessions = run_async(SessionService.list_sessions(user_id))
+            sessions = APIClient.list_sessions(user_id)
             if sessions:
-                latest_id = sessions[0].session_id
-                detail = run_async(SessionService.load_session(latest_id, user_id))
+                latest_id = sessions[0]["session_id"]
+                detail = APIClient.load_session(latest_id, user_id)
                 if detail:
-                    st.session_state.current_session_id = detail.session_id
-                    st.session_state.state = detail.state
-                    st.session_state.messages = detail.messages
-                    st.session_state.history_messages = detail.history_messages
+                    st.session_state.current_session_id = detail["session_id"]
+                    state = detail.get("state", {})
+                    state["user_id"] = user_id
+                    if user_name and not state.get("name"):
+                        state["name"] = user_name
+                    st.session_state.state = state
+                    st.session_state.messages = detail.get("messages", [])
+                    st.session_state.history_messages = detail.get(
+                        "history_messages", []
+                    )
                     return
 
-            create_req = CreateSessionRequest(user_id=user_id, title="New Session")
-            detail = run_async(SessionService.create_session(create_req))
-            st.session_state.current_session_id = detail.session_id
-            st.session_state.state = detail.state
-            st.session_state.messages = detail.messages
-            st.session_state.history_messages = detail.history_messages
+            detail = APIClient.create_session(user_id, title="New Chat Session")
+            if detail:
+                st.session_state.current_session_id = detail["session_id"]
+                state = detail.get("state", {})
+                state["user_id"] = user_id
+                if user_name and not state.get("name"):
+                    state["name"] = user_name
+                st.session_state.state = state
+                st.session_state.messages = detail.get("messages", [])
+                st.session_state.history_messages = detail.get("history_messages", [])
 
     @staticmethod
     def save_current_session() -> None:
         user_id = SessionManager.get_current_user_id()
         if "current_session_id" in st.session_state:
+            from schemas.session import SaveSessionRequest
+            from services.session_service import SessionService
+            from utils.async_runner import run_async
+
+            st.session_state.state["user_id"] = user_id
             save_req = SaveSessionRequest(
                 session_id=st.session_state.current_session_id,
                 user_id=user_id,
                 state=st.session_state.state,
-                messages=st.session_state.messages,
-                history_messages=st.session_state.history_messages,
+                messages=st.session_state.get("messages", []),
+                history_messages=st.session_state.get("history_messages", []),
             )
             run_async(SessionService.save_session(save_req))
 
     @staticmethod
     def create_new_session() -> None:
         user_id = SessionManager.get_current_user_id()
-        create_req = CreateSessionRequest(user_id=user_id, title="New Session")
-        detail = run_async(SessionService.create_session(create_req))
-        st.session_state.current_session_id = detail.session_id
-        st.session_state.state = detail.state
-        st.session_state.messages = detail.messages
-        st.session_state.history_messages = detail.history_messages
+        user_name = st.session_state.get("user_name", "")
+        detail = APIClient.create_session(user_id, title="New Chat Session")
+        if detail:
+            new_id = detail["session_id"]
+            st.session_state.current_session_id = new_id
+            state = detail.get("state", {})
+            state["user_id"] = user_id
+            if user_name and not state.get("name"):
+                state["name"] = user_name
+            st.session_state.state = state
+            st.session_state.messages = [
+                {
+                    "role": "assistant",
+                    "content": f"Hello {user_name or 'there'}! How can I help you today?",
+                }
+            ]
+            st.session_state.history_messages = []
 
     @staticmethod
     def switch_session(session_id: str) -> None:
         user_id = SessionManager.get_current_user_id()
-        detail = run_async(SessionService.load_session(session_id, user_id))
+        detail = APIClient.load_session(session_id, user_id)
         if detail:
-            st.session_state.current_session_id = detail.session_id
-            st.session_state.state = detail.state
-            st.session_state.messages = detail.messages
-            st.session_state.history_messages = detail.history_messages
+            st.session_state.current_session_id = detail["session_id"]
+            state = detail.get("state", {})
+            state["user_id"] = user_id
+            st.session_state.state = state
+            st.session_state.messages = detail.get("messages", [])
+            st.session_state.history_messages = detail.get("history_messages", [])
 
     @staticmethod
     def delete_current_session() -> None:
         user_id = SessionManager.get_current_user_id()
         if "current_session_id" in st.session_state:
             curr_id = st.session_state.current_session_id
-            run_async(SessionService.delete_session(curr_id, user_id))
-            del st.session_state.current_session_id
+            APIClient.delete_session(curr_id, user_id)
+            if "current_session_id" in st.session_state:
+                del st.session_state.current_session_id
             SessionManager.init_session()
-
-    @staticmethod
-    def get_progress() -> int:
-        s = st.session_state.state
-        if s["current_agent"] == NODE_PERSONAL_INFO:
-            if s["name"] or s["location"]:
-                return 25
-            return 10
-        elif s["current_agent"] == NODE_TOPIC_PREF:
-            if s["topic_preferences"]:
-                return 70
-            return 50
-        elif s["current_agent"] == NODE_ENGAGEMENT:
-            return 100
-        return 100

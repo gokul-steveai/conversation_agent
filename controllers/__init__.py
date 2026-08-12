@@ -1,3 +1,3 @@
-from controllers.onboarding_controller import OnboardingController
+from controllers.chat_controller import ChatController
 
-__all__ = ["OnboardingController"]
+__all__ = ["ChatController"]
