@@ -3,10 +3,11 @@ from typing import Annotated, TypedDict
 from langgraph.graph.message import add_messages
 
 
-class OnboardingState(TypedDict, total=False):
+class ChatState(TypedDict, total=False):
+    user_id: str
     name: str
     location: str
     topic_preferences: list[str]
-    engagement_response: str
+    current_agent: str
     messages: Annotated[list, add_messages]
-    next_node: str
+    engagement_response: str

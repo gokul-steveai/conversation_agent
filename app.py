@@ -1,14 +1,14 @@
 import streamlit as st
 
-from controllers.onboarding_controller import OnboardingController
+from config.constants import APP_TITLE
+from ui.api_client import APIClient
 from ui.auth_ui import AuthUI
 from ui.components import UIComponents
 from ui.session import SessionManager
-from utils.async_runner import run_async
 
 # Page Configuration
 st.set_page_config(
-    page_title="AI Onboarding Assistant",
+    page_title=APP_TITLE,
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -30,24 +30,46 @@ UIComponents.render_header()
 quick_prompt = UIComponents.render_quick_actions()
 UIComponents.render_chat_messages()
 
-# User Input & Orchestration Controller Execution
-user_prompt = st.chat_input("Type your response here...") or quick_prompt
+# User Input & Orchestration Execution via FastAPI APIClient
+user_prompt = (
+    st.chat_input("Ask anything, search live web, or write code...") or quick_prompt
+)
 
 if user_prompt:
     st.session_state.messages.append({"role": "user", "content": user_prompt})
 
-    with st.spinner("⚡ Agent reasoning & routing..."):
-        agent_reply, tool_logs = run_async(
-            OnboardingController.process_step(
+    # Display user prompt in chat immediately
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(user_prompt)
+
+    with st.chat_message("assistant", avatar="🤖"):
+
+        def generate_ui_stream():
+            event_stream = APIClient.stream_chat_message(
                 user_text=user_prompt,
-                state=st.session_state.state,
-                history_messages=st.session_state.history_messages,
+                session_id=st.session_state.current_session_id,
+                state=st.session_state.get("state", {}),
             )
-        )
+            for chunk_item in event_stream:
+                event_type = chunk_item.get("event")
+                data_obj = chunk_item.get("data", {})
+                if isinstance(data_obj, str):
+                    data_obj = {"chunk": data_obj, "content": data_obj}
 
-    for tool_log in tool_logs:
-        st.session_state.messages.append(tool_log)
+                if event_type == "tool":
+                    content_str = data_obj.get("content", "")
+                    st.markdown(
+                        f"<div class='tool-card'>{content_str}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.session_state.messages.append(
+                        {"role": "tool", "content": content_str}
+                    )
+                elif event_type == "message":
+                    text_chunk = data_obj.get("chunk", "")
+                    yield text_chunk
 
-    st.session_state.messages.append({"role": "assistant", "content": agent_reply})
-    SessionManager.save_current_session()
+        full_response = st.write_stream(generate_ui_stream())
+
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
     st.rerun()

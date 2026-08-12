@@ -69,6 +69,8 @@ class SessionRepository(IBaseRepository[SessionModel]):
                     is_active=True,
                 )
 
+                from datetime import datetime, timezone
+
                 upsert_stmt = insert_stmt.on_conflict_do_update(
                     index_elements=[SessionModel.session_id],
                     set_={
@@ -77,9 +79,11 @@ class SessionRepository(IBaseRepository[SessionModel]):
                         "state_json": state_json,
                         "messages_json": messages_json,
                         "history_json": history_json,
+                        "updated_at": datetime.now(timezone.utc),
                         "is_active": True,
                     },
                 )
+
                 await db.execute(upsert_stmt)
 
     @classmethod

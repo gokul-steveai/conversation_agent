@@ -3,6 +3,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
+from sqlalchemy import AsyncAdaptedQueuePool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -12,8 +13,6 @@ from utils.logger import logger
 
 
 class DatabaseManager:
-    """Centralized production-grade Async Database Manager & Session Factory."""
-
     _engine = None
     _SessionLocal = None
     _engine_loop = None
@@ -77,10 +76,19 @@ class DatabaseManager:
             os.makedirs("data", exist_ok=True)
 
             try:
-                engine = create_async_engine(
-                    db_url,
-                    poolclass=NullPool,
-                )
+                if "postgresql" in db_url:
+                    engine = create_async_engine(
+                        db_url,
+                        poolclass=AsyncAdaptedQueuePool,
+                        pool_size=10,
+                        max_overflow=20,
+                        pool_timeout=30,
+                    )
+                else:
+                    engine = create_async_engine(
+                        db_url,
+                        poolclass=NullPool,
+                    )
 
                 async with engine.begin() as conn:
                     await conn.run_sync(Base.metadata.create_all)
@@ -104,7 +112,6 @@ class DatabaseManager:
     @classmethod
     @asynccontextmanager
     async def get_db(cls) -> AsyncGenerator[AsyncSession, None]:
-        """Centralized async transactional context manager for database sessions."""
         await cls.init_engine()
         async with cls._SessionLocal() as db:
             try:
@@ -118,6 +125,5 @@ class DatabaseManager:
 
 @asynccontextmanager
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Convenience helper providing a centralized async database session context."""
     async with DatabaseManager.get_db() as session:
         yield session

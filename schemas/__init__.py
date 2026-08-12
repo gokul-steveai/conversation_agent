@@ -1,12 +1,10 @@
 from .auth import AuthResponse, UserLoginRequest, UserRegisterRequest, UserResponse
 from .schemas import (
-    PersonalInformation,
-    PersonalInformationResponse,
+    ChatDecision,
+    ChatMessageRequest,
+    ChatMessageResponse,
     StateUpdate,
-    SupervisorResponse,
-    TopicPreferences,
-    TopicPreferencesResponse,
-    WebSearchDecision,
+    ToolLogItem,
 )
 from .session import (
     CreateSessionRequest,
@@ -14,17 +12,15 @@ from .session import (
     SessionDetailResponse,
     SessionResponse,
 )
-from .state import OnboardingState
+from .state import ChatState
 
 __all__ = [
-    "SupervisorResponse",
-    "PersonalInformationResponse",
-    "TopicPreferencesResponse",
-    "PersonalInformation",
-    "TopicPreferences",
     "StateUpdate",
-    "WebSearchDecision",
-    "OnboardingState",
+    "ChatDecision",
+    "ChatMessageRequest",
+    "ChatMessageResponse",
+    "ToolLogItem",
+    "ChatState",
     "UserRegisterRequest",
     "UserLoginRequest",
     "UserResponse",

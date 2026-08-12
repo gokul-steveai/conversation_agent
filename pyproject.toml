@@ -9,6 +9,8 @@ dependencies = [
     "asyncpg>=0.31.0",
     "bcrypt>=5.0.0",
     "email-validator>=2.3.0",
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
     "langchain>=1.3.14",
     "langchain-groq>=1.1.3",
     "langgraph>=1.2.10",
@@ -16,9 +18,11 @@ dependencies = [
     "pygraphviz>=2.0.1",
     "pyjwt>=2.13.0",
     "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
     "sqlalchemy>=2.0.51",
     "streamlit>=1.61.1",
     "tavily-python>=0.7.27",
+    "uvicorn>=0.52.1",
 ]
 
 [dependency-groups]

@@ -7,7 +7,18 @@ load_dotenv()
 
 
 class Settings(BaseModel):
-    app_name: str = "Conversation Agent"
+    app_name: str = "AI Chat Assistant"
+
+    environment: str = Field(
+        default_factory=lambda: os.getenv("ENVIRONMENT", "development")
+    )
+    allowed_origins: list[str] = Field(
+        default_factory=lambda: [
+            origin.strip()
+            for origin in os.getenv("ALLOWED_ORIGINS", "*").split(",")
+            if origin.strip()
+        ]
+    )
     groq_api_key: str = Field(default_factory=lambda: os.getenv("GROQ_API_KEY", ""))
     groq_model: str = Field(
         default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")

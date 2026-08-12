@@ -12,9 +12,9 @@ from langchain_core.messages import (
 
 from config.constants import (
     DEFAULT_GREETING,
-    NODE_PERSONAL_INFO,
-    SYSTEM_PROMPT_PERSONAL_INFO,
+    NODE_CHAT,
 )
+from prompts import SYSTEM_PROMPT_CHAT
 from repositories.session_repository import SessionRepository
 from repositories.user_repository import UserRepository
 from schemas.session import (
@@ -42,7 +42,6 @@ class SessionService:
                 return []
 
             first = data[0]
-            # Detect legacy format: {"type": "human", "content": "..."} lacking LangChain's "data" sub-dict
             if isinstance(first, dict) and "data" not in first and "content" in first:
                 migrated_dicts = []
                 for item in data:
@@ -79,7 +78,7 @@ class SessionService:
     async def create_session(
         cls,
         request_or_user_id: Union[CreateSessionRequest, str],
-        title: str = "New Onboarding Session",
+        title: str = "New Chat Session",
     ) -> SessionDetailResponse:
         if isinstance(request_or_user_id, CreateSessionRequest):
             user_id = request_or_user_id.user_id
@@ -91,22 +90,27 @@ class SessionService:
         if not user_id:
             raise ValueError("user_id must be provided to create a session.")
 
-        # Ensure owner user record exists for FK integrity
         await UserRepository.get_or_create_user(user_id=user_id)
 
         session_id = str(uuid.uuid4())
 
         initial_state = {
+            "user_id": user_id,
             "name": "",
             "location": "",
             "topic_preferences": [],
-            "engagement_response": "",
-            "current_agent": NODE_PERSONAL_INFO,
-            "completed": False,
+            "current_agent": NODE_CHAT,
         }
         initial_messages = [{"role": "assistant", "content": DEFAULT_GREETING}]
         initial_history = [
-            SystemMessage(SYSTEM_PROMPT_PERSONAL_INFO),
+            SystemMessage(
+                SYSTEM_PROMPT_CHAT.format(
+                    name="User",
+                    location="Not specified",
+                    topics="General",
+                    current_time="",
+                )
+            ),
             AIMessage(DEFAULT_GREETING),
         ]
 
