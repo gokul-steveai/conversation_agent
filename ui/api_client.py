@@ -2,6 +2,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 import requests
+import streamlit as st
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
@@ -9,8 +10,6 @@ BASE_API_URL = "http://localhost:8000/api/v1"
 
 
 class APIClient:
-    """Production HTTP Client with connection pooling, retries, and error resilience."""
-
     _session = None
 
     @classmethod
@@ -32,11 +31,24 @@ class APIClient:
         return cls._session
 
     @classmethod
+    def _get_headers(cls) -> Dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        token = st.session_state.get("jwt_token")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    @classmethod
     def register(cls, name: str, email: str, password: str) -> Dict[str, Any]:
         url = f"{BASE_API_URL}/auth/register"
         payload = {"name": name, "email": email, "password": password}
         try:
-            http_response = cls.get_session().post(url, json=payload, timeout=10)
+            http_response = cls.get_session().post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
             return http_response.json()
         except Exception as exception_detail:
             return {
@@ -49,7 +61,12 @@ class APIClient:
         url = f"{BASE_API_URL}/auth/login"
         payload = {"email": email, "password": password}
         try:
-            http_response = cls.get_session().post(url, json=payload, timeout=10)
+            http_response = cls.get_session().post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
             return http_response.json()
         except Exception as exception_detail:
             return {
@@ -58,11 +75,11 @@ class APIClient:
             }
 
     @classmethod
-    def list_sessions(cls, user_id: str) -> List[Dict[str, Any]]:
+    def list_sessions(cls, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         url = f"{BASE_API_URL}/sessions"
         try:
             http_response = cls.get_session().get(
-                url, params={"user_id": user_id}, timeout=10
+                url, headers=cls._get_headers(), timeout=10
             )
             if http_response.status_code == 200:
                 return http_response.json()
@@ -72,24 +89,15 @@ class APIClient:
 
     @classmethod
     def create_session(
-        cls, user_id: str, title: str = "New Chat Session"
+        cls, user_id: Optional[str] = None, title: str = "New Chat Session"
     ) -> Optional[Dict[str, Any]]:
         url = f"{BASE_API_URL}/sessions"
-        payload = {"user_id": user_id, "title": title}
+        payload = {"title": title}
+        if user_id:
+            payload["user_id"] = user_id
         try:
-            http_response = cls.get_session().post(url, json=payload, timeout=10)
-            if http_response.status_code == 200:
-                return http_response.json()
-            return None
-        except Exception:
-            return None
-
-    @classmethod
-    def load_session(cls, session_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        url = f"{BASE_API_URL}/sessions/{session_id}"
-        try:
-            http_response = cls.get_session().get(
-                url, params={"user_id": user_id}, timeout=10
+            http_response = cls.get_session().post(
+                url, json=payload, headers=cls._get_headers(), timeout=10
             )
             if http_response.status_code == 200:
                 return http_response.json()
@@ -98,11 +106,26 @@ class APIClient:
             return None
 
     @classmethod
-    def delete_session(cls, session_id: str, user_id: str) -> bool:
+    def load_session(
+        cls, session_id: str, user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        url = f"{BASE_API_URL}/sessions/{session_id}"
+        try:
+            http_response = cls.get_session().get(
+                url, headers=cls._get_headers(), timeout=10
+            )
+            if http_response.status_code == 200:
+                return http_response.json()
+            return None
+        except Exception:
+            return None
+
+    @classmethod
+    def delete_session(cls, session_id: str, user_id: Optional[str] = None) -> bool:
         url = f"{BASE_API_URL}/sessions/{session_id}"
         try:
             http_response = cls.get_session().delete(
-                url, params={"user_id": user_id}, timeout=10
+                url, headers=cls._get_headers(), timeout=10
             )
             return http_response.status_code == 200
         except Exception:
@@ -119,7 +142,9 @@ class APIClient:
             "state": state,
         }
         try:
-            http_response = cls.get_session().post(url, json=payload, timeout=60)
+            http_response = cls.get_session().post(
+                url, json=payload, headers=cls._get_headers(), timeout=60
+            )
             if http_response.status_code == 200:
                 return http_response.json()
             return {
@@ -129,7 +154,7 @@ class APIClient:
             }
         except Exception as exception_detail:
             return {
-                "reply": f"Unable to reach FastAPI backend: {str(exception_detail)}. Please check if `uvicorn main:app --port 8000` is running.",
+                "reply": f"Unable to reach FastAPI backend: {str(exception_detail)}.",
                 "tool_logs": [],
                 "updated_state": state,
             }
@@ -138,7 +163,6 @@ class APIClient:
     def stream_chat_message(
         cls, user_text: str, session_id: str, state: Dict[str, Any]
     ):
-        """Streams real-time token events (tool logs and text chunks) from FastAPI SSE endpoint."""
         url = f"{BASE_API_URL}/chat/stream"
         payload = {
             "user_text": user_text,
@@ -147,7 +171,7 @@ class APIClient:
         }
         try:
             with cls.get_session().post(
-                url, json=payload, stream=True, timeout=60
+                url, json=payload, headers=cls._get_headers(), stream=True, timeout=60
             ) as http_response:
                 if http_response.status_code == 200:
                     active_event_type = "message"
@@ -173,15 +197,15 @@ class APIClient:
                                     }
                 else:
                     yield {
-                        "event": "message",
+                        "event": "error",
                         "data": {
-                            "chunk": f"Backend Error HTTP {http_response.status_code}"
+                            "error": f"Backend Error HTTP {http_response.status_code}"
                         },
                     }
         except Exception as exception_detail:
             yield {
-                "event": "message",
+                "event": "error",
                 "data": {
-                    "chunk": f"Unable to reach FastAPI backend: {str(exception_detail)}"
+                    "error": f"Unable to reach FastAPI backend: {str(exception_detail)}"
                 },
             }

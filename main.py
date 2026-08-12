@@ -22,6 +22,7 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     await DatabaseManager.init_engine()
     yield
+    await DatabaseManager.close_engine()
 
 
 app = FastAPI(

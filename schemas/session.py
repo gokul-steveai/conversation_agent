@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
@@ -7,8 +7,10 @@ from pydantic import BaseModel, Field
 class CreateSessionRequest(BaseModel):
     """Request schema for creating a new session."""
 
-    user_id: str = Field(..., description="Authenticated owner user ID")
-    title: str = Field(default="New Onboarding Session", description="Session title")
+    user_id: Optional[str] = Field(
+        default=None, description="Authenticated owner user ID"
+    )
+    title: str = Field(default="New Chat Session", description="Session title")
 
 
 class SaveSessionRequest(BaseModel):
@@ -16,7 +18,7 @@ class SaveSessionRequest(BaseModel):
 
     session_id: str = Field(..., description="Unique session ID")
     user_id: str = Field(..., description="Authenticated owner user ID")
-    state: Dict[str, Any] = Field(..., description="Onboarding state dict")
+    state: Dict[str, Any] = Field(..., description="Session state dict")
     messages: List[Dict[str, Any]] = Field(..., description="UI message history")
     history_messages: List[BaseMessage] = Field(
         ..., description="LangChain BaseMessage history"

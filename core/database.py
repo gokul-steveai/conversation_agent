@@ -83,6 +83,8 @@ class DatabaseManager:
                         pool_size=10,
                         max_overflow=20,
                         pool_timeout=30,
+                        pool_pre_ping=True,
+                        pool_recycle=1800,
                     )
                 else:
                     engine = create_async_engine(
@@ -108,6 +110,17 @@ class DatabaseManager:
                     f"Database engine initialization failed for URL '{db_url.split('@')[-1]}': {e}"
                 )
                 raise
+
+    @classmethod
+    async def close_engine(cls) -> None:
+        if cls._engine is not None:
+            try:
+                await cls._engine.dispose()
+            except Exception as e:
+                logger.error(f"Error disposing database engine: {e}")
+            cls._engine = None
+            cls._SessionLocal = None
+            cls._engine_loop = None
 
     @classmethod
     @asynccontextmanager

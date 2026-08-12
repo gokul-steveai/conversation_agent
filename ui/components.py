@@ -1,3 +1,5 @@
+import html
+
 import streamlit as st
 
 from config.constants import APP_SUBTITLE, APP_TITLE
@@ -175,7 +177,8 @@ class UIComponents:
                 with st.chat_message("user", avatar="👤"):
                     st.markdown(content)
             elif role == "tool":
+                escaped_content = html.escape(content)
                 st.markdown(
-                    f"<div class='tool-card'>{content}</div>",
+                    f"<div class='tool-card'>{escaped_content}</div>",
                     unsafe_allow_html=True,
                 )

@@ -7,11 +7,7 @@ def sanitize_response(text: str) -> str:
     if not text:
         return ""
 
-    # Remove variable assignments if present
-    pattern = r"\b(?:topics|is_complete|name|location|next_node|reason)\s*=\s*.*$"
-    cleaned = re.sub(pattern, "", text, flags=re.IGNORECASE | re.MULTILINE).strip()
-
-    # Remove technical prompt artifacts or disclaimer leakage
+    cleaned = text
     leakage_patterns = [
         r"^based on (?:the )?(?:untrusted )?(?:retrieved )?web data,?\s*",
         r"^based on the provided data,?\s*",

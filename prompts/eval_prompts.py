@@ -5,7 +5,7 @@ SYSTEM_PROMPT_SEARCH_EVALUATION = (
     "1. Analyze if the user prompt is missing critical context or required parameters (e.g., asking for local weather/news when location is 'Not specified' and no city is mentioned, asking for booking without dates, code without snippet).\n"
     "   - If essential context is missing, set needs_clarification = True and write a warm, friendly clarification_question asking the user for what is needed.\n"
     "2. If no essential context is missing and the query requires real-time facts, news, weather, or current events, set needs_web_search = True and construct a clear, targeted search_query.\n"
-    "3. Extract any user name (extracted_name), location (extracted_location), or interests (extracted_topics) mentioned in the prompt."
+    "3. Extract any user name (extracted_name) or interests (extracted_topics). Distinguish query target locations (query_location, e.g. 'weather in Tokyo') from explicitly declared user profile locations (declared_user_location, e.g. 'I live in Paris'). ONLY set declared_user_location when the user explicitly declares their own home/current location."
 )
 
 

@@ -10,7 +10,7 @@ class StateUpdate(BaseModel):
     )
     location: Optional[str] = Field(
         default=None,
-        description="Most specific, refined city or location confirmed in conversation. If a vague nickname like 'city of lakes' was later clarified or confirmed to be 'Bhopal', extract the refined city name 'Bhopal'.",
+        description="Most specific, refined city or location explicitly declared by user in conversation.",
     )
     topics: List[str] = Field(
         default_factory=list,
@@ -37,8 +37,13 @@ class ChatDecision(BaseModel):
     extracted_name: Optional[str] = Field(
         default=None, description="User name mentioned in prompt if any"
     )
-    extracted_location: Optional[str] = Field(
-        default=None, description="Location mentioned in prompt if any"
+    query_location: Optional[str] = Field(
+        default=None,
+        description="Target location requested for search/weather/news query (e.g., 'Tokyo' in 'weather in Tokyo')",
+    )
+    declared_user_location: Optional[str] = Field(
+        default=None,
+        description="User home/current location explicitly declared by user (e.g., 'I live in Paris', 'My location is London')",
     )
     extracted_topics: List[str] = Field(
         default_factory=list, description="Topics/interests mentioned in prompt if any"

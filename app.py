@@ -1,3 +1,5 @@
+import html
+
 import streamlit as st
 
 from config.constants import APP_TITLE
@@ -58,13 +60,23 @@ if user_prompt:
 
                 if event_type == "tool":
                     content_str = data_obj.get("content", "")
+                    escaped_content = html.escape(content_str)
                     st.markdown(
-                        f"<div class='tool-card'>{content_str}</div>",
+                        f"<div class='tool-card'>{escaped_content}</div>",
                         unsafe_allow_html=True,
                     )
                     st.session_state.messages.append(
                         {"role": "tool", "content": content_str}
                     )
+                elif event_type == "state":
+                    updated_state = data_obj.get("updated_state")
+                    if updated_state and isinstance(updated_state, dict):
+                        st.session_state.state = updated_state
+                elif event_type == "error":
+                    err_msg = data_obj.get(
+                        "error", "An error occurred while streaming."
+                    )
+                    st.error(f"❌ {err_msg}")
                 elif event_type == "message":
                     text_chunk = data_obj.get("chunk", "")
                     yield text_chunk

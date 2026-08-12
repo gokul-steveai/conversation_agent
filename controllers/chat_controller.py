@@ -18,6 +18,19 @@ from utils.sanitizer import sanitize_response
 
 class ChatController:
     @classmethod
+    def _bound_history(cls, history_messages: list, max_recent: int = 12) -> list:
+        if len(history_messages) <= max_recent:
+            return history_messages
+
+        system_msgs = [
+            msg for msg in history_messages if isinstance(msg, SystemMessage)
+        ]
+        non_system_msgs = [
+            msg for msg in history_messages if not isinstance(msg, SystemMessage)
+        ]
+        return system_msgs + non_system_msgs[-max_recent:]
+
+    @classmethod
     async def _update_user_context_from_history(
         cls, history_messages: list, state: Dict[str, Any]
     ) -> None:
@@ -60,12 +73,15 @@ class ChatController:
     def _refine_search_query(
         cls, decision: ChatDecision, user_text: str, user_location: str
     ) -> Tuple[str, bool]:
-
         query = (decision.search_query or "").strip()
         if not query and decision.needs_web_search and user_text.strip():
             query = user_text.strip()
 
-        if (
+        if decision.query_location and decision.query_location.strip():
+            target_loc = decision.query_location.strip()
+            if target_loc.lower() not in query.lower():
+                query = f"{target_loc} {query}"
+        elif (
             user_location != "Not specified"
             and user_location.lower() not in query.lower()
         ):
@@ -115,7 +131,8 @@ class ChatController:
                 query_str=search_query, search_data=web_data
             )
         )
-        res = await llm.ainvoke([sys_msg] + history_messages + [web_msg])
+        bounded_history = cls._bound_history(history_messages)
+        res = await llm.ainvoke([sys_msg] + bounded_history + [web_msg])
         reply = sanitize_response(res.content)
         history_messages.append(AIMessage(reply))
         return reply, tool_logs
@@ -137,7 +154,8 @@ class ChatController:
                 current_time_str=time_str,
             )
         )
-        res = await llm.ainvoke([sys_msg] + history_messages)
+        bounded_history = cls._bound_history(history_messages)
+        res = await llm.ainvoke([sys_msg] + bounded_history)
         reply = sanitize_response(res.content)
         history_messages.append(AIMessage(reply))
         return reply, []
@@ -160,8 +178,8 @@ class ChatController:
 
         decision = await cls._evaluate_prompt(user_name, user_loc, user_text)
 
-        if decision.extracted_location and decision.extracted_location.strip():
-            user_loc = decision.extracted_location.strip()
+        if decision.declared_user_location and decision.declared_user_location.strip():
+            user_loc = decision.declared_user_location.strip()
             state["location"] = user_loc
 
         if decision.needs_clarification and decision.clarification_question:

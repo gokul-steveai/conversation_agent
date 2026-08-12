@@ -15,15 +15,15 @@ DEFAULT_TOPIC_GREETING_TEMPLATE = (
 EXIT_KEYWORDS = ["done", "exit", "no", "bye", "quit", "thanks", "thank you"]
 
 __all__ = [
-    "NODE_PERSONAL_INFO",
-    "NODE_TOPIC_PREF",
-    "NODE_ENGAGEMENT",
-    "NODE_CHAT",
-    "NODE_SUPERVISOR",
-    "NODE_FINISH",
-    "APP_TITLE",
     "APP_SUBTITLE",
+    "APP_TITLE",
     "DEFAULT_GREETING",
     "DEFAULT_TOPIC_GREETING_TEMPLATE",
     "EXIT_KEYWORDS",
+    "NODE_CHAT",
+    "NODE_ENGAGEMENT",
+    "NODE_FINISH",
+    "NODE_PERSONAL_INFO",
+    "NODE_SUPERVISOR",
+    "NODE_TOPIC_PREF",
 ]
