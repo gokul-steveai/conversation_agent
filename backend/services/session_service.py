@@ -1,6 +1,6 @@
 import json
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from config.constants import (
     DEFAULT_GREETING,
@@ -26,7 +26,7 @@ from utils import logger
 
 class SessionService:
     @classmethod
-    def serialize_messages(cls, messages: List[BaseMessage]) -> str:
+    def serialize_messages(cls, messages: Sequence[BaseMessage]) -> str:
         """Serializes complete LangChain BaseMessage objects into JSON preserving tool_calls, IDs, and metadata."""
         message_dicts = messages_to_dict(messages)
         return json.dumps(message_dicts)
@@ -99,7 +99,7 @@ class SessionService:
             "current_agent": NODE_CHAT,
         }
         initial_messages = [{"role": "assistant", "content": DEFAULT_GREETING}]
-        initial_history = [
+        initial_history: List[BaseMessage] = [
             SystemMessage(
                 SYSTEM_PROMPT_CHAT.format(
                     name="User",
@@ -155,7 +155,7 @@ class SessionService:
         if not user_id:
             raise ValueError("user_id must be provided to load a session.")
 
-        row = await SessionRepository.find_by_id(session_id, user_id)
+        row = await SessionRepository.find_by_session_and_user_id(session_id, user_id)
         if row:
             state = json.loads(row.state_json)
             messages = json.loads(row.messages_json)
@@ -204,4 +204,4 @@ class SessionService:
         if not user_id:
             raise ValueError("user_id must be provided to delete a session.")
 
-        await SessionRepository.delete_by_id(session_id, user_id)
+        await SessionRepository.delete_by_session_id_and_user_id(session_id, user_id)

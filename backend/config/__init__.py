@@ -1,4 +1,4 @@
-from config import constants
-from config.settings import settings
+from . import constants
+from .settings import settings
 
 __all__ = ["settings", "constants"]

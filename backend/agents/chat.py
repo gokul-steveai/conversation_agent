@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from core import llm
+from core.observability import langfuse_handler
 from langchain_core.messages import SystemMessage
 from prompts import SYSTEM_PROMPT_CHAT
 from schemas import ChatState
@@ -25,7 +26,7 @@ async def chat_agent(state: ChatState) -> Dict[str, Any]:
     )
 
     messages = [sys_prompt] + list(state.get("messages", []))
-    res = await llm.ainvoke(messages)
+    res = await llm.ainvoke(messages, config={"callbacks": [langfuse_handler]})
     clean_reply = sanitize_response(res.content)
 
     return {"engagement_response": clean_reply}

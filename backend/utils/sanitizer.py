@@ -1,13 +1,19 @@
 import re
+from typing import Any, List, Union
 
 from pydantic import ValidationError
 
 
-def sanitize_response(text: str) -> str:
+def sanitize_response(text: Union[str, List[Any]]) -> str:
     if not text:
         return ""
 
-    cleaned = text
+    if isinstance(text, list):
+        str_text = " ".join(str(item) for item in text)
+    else:
+        str_text = str(text)
+
+    cleaned = str_text
     leakage_patterns = [
         r"^based on (?:the )?(?:untrusted )?(?:retrieved )?web data,?\s*",
         r"^based on the provided data,?\s*",
@@ -20,7 +26,7 @@ def sanitize_response(text: str) -> str:
             leak_pat, "", cleaned, flags=re.IGNORECASE | re.MULTILINE
         ).strip()
 
-    return cleaned if cleaned else text.strip()
+    return cleaned if cleaned else str_text.strip()
 
 
 def format_validation_error(e: ValidationError) -> str:

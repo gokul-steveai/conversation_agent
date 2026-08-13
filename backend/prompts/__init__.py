@@ -1,9 +1,9 @@
-from prompts.eval_prompts import (
+from .eval_prompts import (
     HUMAN_PROMPT_UNTRUSTED_WEB_DATA,
     SYSTEM_PROMPT_SEARCH_EVALUATION,
     SYSTEM_PROMPT_WEB_SYNTHESIS,
 )
-from prompts.system_prompts import (
+from .system_prompts import (
     SYSTEM_PROMPT_CHAT,
     SYSTEM_PROMPT_DIRECT_CHAT,
 )

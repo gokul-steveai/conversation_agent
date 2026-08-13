@@ -1,3 +1,3 @@
-from controllers.chat_controller import ChatController
+from .chat_controller import ChatController
 
 __all__ = ["ChatController"]
