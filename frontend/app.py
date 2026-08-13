@@ -10,7 +10,7 @@ except ImportError:
 try:
     from frontend.ui import APIClient, AuthUI, SessionManager, UIComponents
 except ImportError:
-    from .ui import APIClient, AuthUI, SessionManager, UIComponents
+    from ui import APIClient, AuthUI, SessionManager, UIComponents
 
 
 # Page Configuration
