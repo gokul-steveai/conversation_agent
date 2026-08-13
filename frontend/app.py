@@ -7,7 +7,11 @@ try:
 except ImportError:
     APP_TITLE = "AI Chat Assistant"
 
-from ui import APIClient, AuthUI, SessionManager, UIComponents
+try:
+    from frontend.ui import APIClient, AuthUI, SessionManager, UIComponents
+except ImportError:
+    from .ui import APIClient, AuthUI, SessionManager, UIComponents
+
 
 # Page Configuration
 st.set_page_config(
@@ -39,17 +43,18 @@ user_prompt = (
 )
 
 if user_prompt:
-    st.session_state.messages.append({"role": "user", "content": user_prompt})
+    prompt_str: str = user_prompt
+    st.session_state.messages.append({"role": "user", "content": prompt_str})
 
     # Display user prompt in chat immediately
     with st.chat_message("user", avatar="👤"):
-        st.markdown(user_prompt)
+        st.markdown(prompt_str)
 
     with st.chat_message("assistant", avatar="🤖"):
 
         def generate_ui_stream():
             event_stream = APIClient.stream_chat_message(
-                user_text=user_prompt,
+                user_text=prompt_str,
                 session_id=st.session_state.current_session_id,
                 state=st.session_state.get("state", {}),
             )

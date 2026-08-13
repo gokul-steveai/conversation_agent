@@ -1,11 +1,19 @@
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
+
+# Automatically ensure backend folder is in sys.path
+backend_dir = Path(__file__).resolve().parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
 
 from api.v1 import router
 from config import settings
-from core import DatabaseManager
+from core import DatabaseManager, langfuse
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +28,10 @@ async def lifespan(app: FastAPI):
     await DatabaseManager.init_engine()
     yield
     await DatabaseManager.close_engine()
+    try:
+        langfuse.flush()
+    except Exception:
+        pass
 
 
 app = FastAPI(

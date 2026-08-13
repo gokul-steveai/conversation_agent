@@ -53,7 +53,9 @@ class SessionRepository(IBaseRepository[SessionModel]):
             await db.execute(upsert_stmt)
 
     @classmethod
-    async def find_by_id(cls, session_id: str, user_id: str) -> Optional[SessionModel]:
+    async def find_by_session_and_user_id(
+        cls, session_id: str, user_id: str
+    ) -> Optional[SessionModel]:
         async with get_db() as db:
             result = await db.execute(
                 select(SessionModel).filter(
@@ -88,7 +90,9 @@ class SessionRepository(IBaseRepository[SessionModel]):
             return list(result.scalars().all())
 
     @classmethod
-    async def delete_by_id(cls, session_id: str, user_id: str = "") -> None:
+    async def delete_by_session_id_and_user_id(
+        cls, session_id: str, user_id: str = ""
+    ) -> None:
         async with get_db() as db:
             stmt = select(SessionModel).filter(SessionModel.session_id == session_id)
             if user_id:

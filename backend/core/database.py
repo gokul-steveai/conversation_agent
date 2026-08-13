@@ -5,9 +5,8 @@ from typing import AsyncGenerator, Optional
 
 from config.settings import settings
 from models import Base
-from sqlalchemy import AsyncAdaptedQueuePool
+from sqlalchemy import AsyncAdaptedQueuePool, NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 from utils.logger import logger
 
 
@@ -125,6 +124,9 @@ class DatabaseManager:
     @asynccontextmanager
     async def get_db(cls) -> AsyncGenerator[AsyncSession, None]:
         await cls.init_engine()
+        assert cls._SessionLocal is not None, (
+            "Session local factory must be initialized"
+        )
         async with cls._SessionLocal() as db:
             try:
                 yield db

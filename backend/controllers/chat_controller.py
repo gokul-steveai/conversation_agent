@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
 from core.llm_factory import ainvoke_structured, llm
+from core.observability import langfuse_handler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from prompts import (
     HUMAN_PROMPT_UNTRUSTED_WEB_DATA,
@@ -126,7 +127,10 @@ class ChatController:
             )
         )
         bounded_history = cls._bound_history(history_messages)
-        res = await llm.ainvoke([sys_msg] + bounded_history + [web_msg])
+        res = await llm.ainvoke(
+            [sys_msg] + bounded_history + [web_msg],
+            config={"callbacks": [langfuse_handler]},
+        )
         reply = sanitize_response(res.content)
         history_messages.append(AIMessage(reply))
         return reply, tool_logs
@@ -149,7 +153,9 @@ class ChatController:
             )
         )
         bounded_history = cls._bound_history(history_messages)
-        res = await llm.ainvoke([sys_msg] + bounded_history)
+        res = await llm.ainvoke(
+            [sys_msg] + bounded_history, config={"callbacks": [langfuse_handler]}
+        )
         reply = sanitize_response(res.content)
         history_messages.append(AIMessage(reply))
         return reply, []

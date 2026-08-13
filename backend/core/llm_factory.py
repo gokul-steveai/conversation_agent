@@ -1,10 +1,11 @@
 import re
-from typing import List, Optional, Type, TypeVar
+from typing import Optional, Sequence, Type, TypeVar, cast
 
 from config.settings import settings
+from core.observability import langfuse_handler
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_groq import ChatGroq
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from utils.logger import logger
 
 T = TypeVar("T", bound=BaseModel)
@@ -16,10 +17,11 @@ class LLMFactory:
     @classmethod
     def get_llm(cls, temperature: Optional[float] = None) -> ChatGroq:
         temp = temperature if temperature is not None else settings.default_temperature
+        api_key = SecretStr(settings.groq_api_key) if settings.groq_api_key else None
         return ChatGroq(
             model=settings.groq_model,
             temperature=temp,
-            groq_api_key=settings.groq_api_key or None,
+            api_key=api_key,
         )
 
 
@@ -50,11 +52,14 @@ def extract_json_from_failed_generation(
 async def ainvoke_structured(
     llm_instance: ChatGroq,
     schema_cls: Type[T],
-    messages: List[BaseMessage],
+    messages: Sequence[BaseMessage],
 ) -> T:
     try:
         structured_llm = llm_instance.with_structured_output(schema_cls)
-        return await structured_llm.ainvoke(messages)
+        res = await structured_llm.ainvoke(
+            messages, config={"callbacks": [langfuse_handler]}
+        )
+        return cast(T, res)
     except Exception as e:
         err_str = str(e)
         if "tool_use_failed" in err_str or "failed_generation" in err_str:
@@ -72,4 +77,7 @@ async def ainvoke_structured(
             f"Respond exclusively in JSON format matching the schema for {schema_cls.__name__}."
         )
         json_llm = llm_instance.with_structured_output(schema_cls, method="json_mode")
-        return await json_llm.ainvoke([json_sys_msg] + list(messages))
+        res = await json_llm.ainvoke(
+            [json_sys_msg] + list(messages), config={"callbacks": [langfuse_handler]}
+        )
+        return cast(T, res)

@@ -13,12 +13,8 @@ class Settings(BaseModel):
     )
     allowed_origins: list[str] = Field(
         default_factory=lambda: (
-            [
-                origin.strip()
-                for origin in os.getenv("ALLOWED_ORIGINS").split(",")
-                if origin.strip()
-            ]
-            if os.getenv("ALLOWED_ORIGINS")
+            [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+            if (origins_env := os.getenv("ALLOWED_ORIGINS"))
             else [
                 "http://localhost:8501",
                 "http://127.0.0.1:8501",

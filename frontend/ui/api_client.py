@@ -6,7 +6,7 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
+from urllib3.util.retry import Retry
 
 load_dotenv()
 
@@ -181,6 +181,8 @@ class APIClient:
                     active_event_type = "message"
                     for line in http_response.iter_lines(decode_unicode=True):
                         if line:
+                            if isinstance(line, bytes):
+                                line = line.decode("utf-8")
                             if line.startswith("event: "):
                                 active_event_type = line[7:].strip()
                             elif line.startswith("data: "):
