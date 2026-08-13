@@ -20,6 +20,7 @@ async def _resolve_chat_context(
     user_id = current_user.user_id
     state = request.state or {}
     state["user_id"] = user_id
+    state["session_id"] = request.session_id
 
     existing = await SessionService.load_session(request.session_id, user_id)
     if existing:
@@ -32,6 +33,7 @@ async def _resolve_chat_context(
         messages = []
         current_state = state
 
+    current_state["session_id"] = request.session_id
     return user_id, current_state, history_messages, messages
 
 

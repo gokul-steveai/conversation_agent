@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
+from core.database import DatabaseManager
 from core.llm_factory import ainvoke_structured, llm
 from core.observability import langfuse_handler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -13,9 +14,50 @@ from prompts import (
 from schemas.schemas import ChatDecision, StateUpdate
 from services import SearchService
 from utils import sanitize_response
+from utils.helper import MemoryManager
 
 
 class ChatController:
+    @classmethod
+    def _get_memory_manager(cls) -> Optional[MemoryManager]:
+        if DatabaseManager._SessionLocal:
+            return MemoryManager(DatabaseManager._SessionLocal)
+        return None
+
+    @classmethod
+    async def _save_message_memory(
+        cls, session_id: str, content: str, role: str
+    ) -> None:
+        if not session_id:
+            return
+        try:
+            mgr = cls._get_memory_manager()
+            if mgr:
+                await mgr.write_conversational_memory(
+                    content=content, role=role, thread_id=session_id
+                )
+        except Exception:
+            pass
+
+    @classmethod
+    async def _save_tool_log(
+        cls, session_id: str, tool_name: str, tool_args: Any, result: str
+    ) -> None:
+        if not session_id:
+            return
+        try:
+            mgr = cls._get_memory_manager()
+            if mgr:
+                await mgr.write_tool_log(
+                    thread_id=session_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    result=result,
+                    status="success",
+                )
+        except Exception:
+            pass
+
     @classmethod
     def _bound_history(cls, history_messages: list, max_recent: int = 12) -> list:
         if len(history_messages) <= max_recent:
@@ -45,7 +87,6 @@ class ChatController:
                 existing = state.get("topic_preferences", [])
                 new_topics = [t.strip() for t in refined.topics if t.strip()]
                 state["topic_preferences"] = list(dict.fromkeys(existing + new_topics))
-
         except Exception:
             pass
 
@@ -96,6 +137,16 @@ class ChatController:
         return query, is_required
 
     @classmethod
+    async def _invoke_and_record_reply(
+        cls, messages: list, history_messages: list, session_id: str = ""
+    ) -> str:
+        res = await llm.ainvoke(messages, config={"callbacks": [langfuse_handler]})
+        reply = sanitize_response(res.content)
+        history_messages.append(AIMessage(reply))
+        await cls._save_message_memory(session_id, reply, role="assistant")
+        return reply
+
+    @classmethod
     async def _execute_search_flow(
         cls,
         search_query: str,
@@ -104,6 +155,7 @@ class ChatController:
         topics_str: str,
         time_str: str,
         history_messages: list,
+        session_id: str = "",
     ) -> Tuple[str, list]:
         tool_logs = [
             {
@@ -112,6 +164,9 @@ class ChatController:
             }
         ]
         web_data = await SearchService.asearch_general(search_query)
+        await cls._save_tool_log(
+            session_id, "tavily_search", {"query": search_query}, web_data
+        )
 
         sys_msg = SystemMessage(
             SYSTEM_PROMPT_WEB_SYNTHESIS.format(
@@ -127,12 +182,11 @@ class ChatController:
             )
         )
         bounded_history = cls._bound_history(history_messages)
-        res = await llm.ainvoke(
+        reply = await cls._invoke_and_record_reply(
             [sys_msg] + bounded_history + [web_msg],
-            config={"callbacks": [langfuse_handler]},
+            history_messages,
+            session_id=session_id,
         )
-        reply = sanitize_response(res.content)
-        history_messages.append(AIMessage(reply))
         return reply, tool_logs
 
     @classmethod
@@ -143,6 +197,7 @@ class ChatController:
         topics_str: str,
         time_str: str,
         history_messages: list,
+        session_id: str = "",
     ) -> Tuple[str, list]:
         sys_msg = SystemMessage(
             SYSTEM_PROMPT_DIRECT_CHAT.format(
@@ -153,11 +208,9 @@ class ChatController:
             )
         )
         bounded_history = cls._bound_history(history_messages)
-        res = await llm.ainvoke(
-            [sys_msg] + bounded_history, config={"callbacks": [langfuse_handler]}
+        reply = await cls._invoke_and_record_reply(
+            [sys_msg] + bounded_history, history_messages, session_id=session_id
         )
-        reply = sanitize_response(res.content)
-        history_messages.append(AIMessage(reply))
         return reply, []
 
     @classmethod
@@ -167,7 +220,10 @@ class ChatController:
         state: Dict[str, Any],
         history_messages: list,
     ) -> Tuple[str, list]:
+        session_id = state.get("session_id") or state.get("thread_id") or ""
         history_messages.append(HumanMessage(user_text))
+        await cls._save_message_memory(session_id, user_text, role="user")
+
         await cls._update_user_context_from_history(history_messages, state)
 
         user_name = state.get("name") or "User"
@@ -185,15 +241,27 @@ class ChatController:
         if decision.needs_clarification and decision.clarification_question:
             clarification = decision.clarification_question.strip()
             history_messages.append(AIMessage(clarification))
+            await cls._save_message_memory(session_id, clarification, role="assistant")
             return clarification, []
 
         query, is_search = cls._refine_search_query(decision, user_text, user_loc)
 
         if is_search:
             return await cls._execute_search_flow(
-                query, user_name, user_loc, topics_str, time_str, history_messages
+                query,
+                user_name,
+                user_loc,
+                topics_str,
+                time_str,
+                history_messages,
+                session_id=session_id,
             )
 
         return await cls._execute_direct_flow(
-            user_name, user_loc, topics_str, time_str, history_messages
+            user_name,
+            user_loc,
+            topics_str,
+            time_str,
+            history_messages,
+            session_id=session_id,
         )
