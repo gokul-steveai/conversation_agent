@@ -12,16 +12,15 @@ from prompts import (
     SYSTEM_PROMPT_WEB_SYNTHESIS,
 )
 from schemas.schemas import ChatDecision, StateUpdate
-from services import SearchService
+from services import MemoryService, SearchService
 from utils import sanitize_response
-from utils.helper import MemoryManager
 
 
 class ChatController:
     @classmethod
-    def _get_memory_manager(cls) -> Optional[MemoryManager]:
+    def _get_memory_service(cls) -> Optional[MemoryService]:
         if DatabaseManager._SessionLocal:
-            return MemoryManager(DatabaseManager._SessionLocal)
+            return MemoryService(DatabaseManager._SessionLocal)
         return None
 
     @classmethod
@@ -31,9 +30,9 @@ class ChatController:
         if not session_id:
             return
         try:
-            memory_manager = cls._get_memory_manager()
-            if memory_manager:
-                await memory_manager.write_conversational_memory(
+            memory_service = cls._get_memory_service()
+            if memory_service:
+                await memory_service.write_conversational_memory(
                     content=content, role=role, thread_id=session_id
                 )
         except Exception:
@@ -41,14 +40,18 @@ class ChatController:
 
     @classmethod
     async def _save_tool_log(
-        cls, session_id: str, tool_name: str, tool_args: Any, result: str
+        cls,
+        session_id: str,
+        tool_name: str,
+        tool_args: Any,
+        result: str,
     ) -> None:
         if not session_id:
             return
         try:
-            memory_manager = cls._get_memory_manager()
-            if memory_manager:
-                await memory_manager.write_tool_log(
+            memory_service = cls._get_memory_service()
+            if memory_service:
+                await memory_service.write_tool_log(
                     thread_id=session_id,
                     tool_name=tool_name,
                     tool_args=tool_args,
@@ -79,7 +82,9 @@ class ChatController:
 
     @classmethod
     async def _update_user_context_from_history(
-        cls, history_messages: List[BaseMessage], state: Dict[str, Any]
+        cls,
+        history_messages: List[BaseMessage],
+        state: Dict[str, Any],
     ) -> None:
         try:
             refined: StateUpdate = await ainvoke_structured(
@@ -90,7 +95,10 @@ class ChatController:
             if refined.location and refined.location.strip():
                 state["location"] = refined.location.strip()
             if refined.topics:
-                existing_topics = state.get("topic_preferences", [])
+                existing_topics_raw = state.get("topic_preferences", [])
+                existing_topics: List[str] = (
+                    existing_topics_raw if isinstance(existing_topics_raw, list) else []
+                )
                 new_topics = [
                     topic.strip() for topic in refined.topics if topic.strip()
                 ]
@@ -237,15 +245,24 @@ class ChatController:
         state: Dict[str, Any],
         history_messages: List[BaseMessage],
     ) -> Tuple[str, List[Dict[str, Any]]]:
-        session_id = state.get("session_id") or state.get("thread_id") or ""
+        session_id_val = state.get("session_id") or state.get("thread_id") or ""
+        session_id = session_id_val if isinstance(session_id_val, str) else ""
+
         history_messages.append(HumanMessage(user_text))
         await cls._save_message_memory(session_id, user_text, role="user")
 
         await cls._update_user_context_from_history(history_messages, state)
 
-        user_name = state.get("name") or "User"
-        user_location = state.get("location") or "Not specified"
-        user_topics = state.get("topic_preferences") or []
+        user_name_val = state.get("name") or "User"
+        user_name = user_name_val if isinstance(user_name_val, str) else "User"
+
+        user_location_val = state.get("location") or "Not specified"
+        user_location = (
+            user_location_val if isinstance(user_location_val, str) else "Not specified"
+        )
+
+        user_topics_val = state.get("topic_preferences") or []
+        user_topics = user_topics_val if isinstance(user_topics_val, list) else []
         formatted_topics = ", ".join(user_topics) if user_topics else "General"
         formatted_current_time = datetime.now(timezone.utc).strftime(
             "%Y-%m-%d %H:%M UTC"
