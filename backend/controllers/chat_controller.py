@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.database import DatabaseManager
 from core.llm_factory import ainvoke_structured, llm
 from core.observability import langfuse_handler
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from prompts import (
     HUMAN_PROMPT_UNTRUSTED_WEB_DATA,
     SYSTEM_PROMPT_DIRECT_CHAT,
@@ -31,9 +31,9 @@ class ChatController:
         if not session_id:
             return
         try:
-            mgr = cls._get_memory_manager()
-            if mgr:
-                await mgr.write_conversational_memory(
+            memory_manager = cls._get_memory_manager()
+            if memory_manager:
+                await memory_manager.write_conversational_memory(
                     content=content, role=role, thread_id=session_id
                 )
         except Exception:
@@ -46,9 +46,9 @@ class ChatController:
         if not session_id:
             return
         try:
-            mgr = cls._get_memory_manager()
-            if mgr:
-                await mgr.write_tool_log(
+            memory_manager = cls._get_memory_manager()
+            if memory_manager:
+                await memory_manager.write_tool_log(
                     thread_id=session_id,
                     tool_name=tool_name,
                     tool_args=tool_args,
@@ -59,21 +59,27 @@ class ChatController:
             pass
 
     @classmethod
-    def _bound_history(cls, history_messages: list, max_recent: int = 12) -> list:
+    def _bound_history(
+        cls, history_messages: List[BaseMessage], max_recent: int = 12
+    ) -> List[BaseMessage]:
         if len(history_messages) <= max_recent:
             return history_messages
 
-        system_msgs = [
-            msg for msg in history_messages if isinstance(msg, SystemMessage)
+        system_messages = [
+            message
+            for message in history_messages
+            if isinstance(message, SystemMessage)
         ]
-        non_system_msgs = [
-            msg for msg in history_messages if not isinstance(msg, SystemMessage)
+        non_system_messages = [
+            message
+            for message in history_messages
+            if not isinstance(message, SystemMessage)
         ]
-        return system_msgs + non_system_msgs[-max_recent:]
+        return system_messages + non_system_messages[-max_recent:]
 
     @classmethod
     async def _update_user_context_from_history(
-        cls, history_messages: list, state: Dict[str, Any]
+        cls, history_messages: List[BaseMessage], state: Dict[str, Any]
     ) -> None:
         try:
             refined: StateUpdate = await ainvoke_structured(
@@ -84,9 +90,13 @@ class ChatController:
             if refined.location and refined.location.strip():
                 state["location"] = refined.location.strip()
             if refined.topics:
-                existing = state.get("topic_preferences", [])
-                new_topics = [t.strip() for t in refined.topics if t.strip()]
-                state["topic_preferences"] = list(dict.fromkeys(existing + new_topics))
+                existing_topics = state.get("topic_preferences", [])
+                new_topics = [
+                    topic.strip() for topic in refined.topics if topic.strip()
+                ]
+                state["topic_preferences"] = list(
+                    dict.fromkeys(existing_topics + new_topics)
+                )
         except Exception:
             pass
 
@@ -94,7 +104,7 @@ class ChatController:
     async def _evaluate_prompt(
         cls, user_name: str, user_location: str, user_text: str
     ) -> ChatDecision:
-        eval_messages = [
+        evaluation_messages = [
             SystemMessage(
                 SYSTEM_PROMPT_SEARCH_EVALUATION.format(
                     user_name=user_name,
@@ -103,27 +113,27 @@ class ChatController:
                 )
             )
         ]
-        return await ainvoke_structured(llm, ChatDecision, eval_messages)
+        return await ainvoke_structured(llm, ChatDecision, evaluation_messages)
 
     @classmethod
     def _refine_search_query(
         cls, decision: ChatDecision, user_text: str, user_location: str
     ) -> Tuple[str, bool]:
-        query = (decision.search_query or "").strip()
-        if not query and decision.needs_web_search and user_text.strip():
-            query = user_text.strip()
+        search_query = (decision.search_query or "").strip()
+        if not search_query and decision.needs_web_search and user_text.strip():
+            search_query = user_text.strip()
 
         if decision.query_location and decision.query_location.strip():
-            target_loc = decision.query_location.strip()
-            if target_loc.lower() not in query.lower():
-                query = f"{target_loc} {query}"
+            target_location = decision.query_location.strip()
+            if target_location.lower() not in search_query.lower():
+                search_query = f"{target_location} {search_query}"
         elif (
             user_location != "Not specified"
-            and user_location.lower() not in query.lower()
+            and user_location.lower() not in search_query.lower()
         ):
             if any(
-                kw in query.lower()
-                for kw in [
+                keyword in search_query.lower()
+                for keyword in [
                     "my location",
                     "current location",
                     "here",
@@ -131,95 +141,102 @@ class ChatController:
                     "weather",
                 ]
             ):
-                query = f"{user_location} {query}"
+                search_query = f"{user_location} {search_query}"
 
-        is_required = decision.needs_web_search and bool(query)
-        return query, is_required
+        is_search_required = decision.needs_web_search and bool(search_query)
+        return search_query, is_search_required
 
     @classmethod
     async def _invoke_and_record_reply(
-        cls, messages: list, history_messages: list, session_id: str = ""
+        cls,
+        messages: List[BaseMessage],
+        history_messages: List[BaseMessage],
+        session_id: str = "",
     ) -> str:
-        res = await llm.ainvoke(messages, config={"callbacks": [langfuse_handler]})
-        reply = sanitize_response(res.content)
-        history_messages.append(AIMessage(reply))
-        await cls._save_message_memory(session_id, reply, role="assistant")
-        return reply
+        llm_response = await llm.ainvoke(
+            messages, config={"callbacks": [langfuse_handler]}
+        )
+        assistant_reply = sanitize_response(llm_response.content)
+        history_messages.append(AIMessage(assistant_reply))
+        await cls._save_message_memory(session_id, assistant_reply, role="assistant")
+        return assistant_reply
 
     @classmethod
     async def _execute_search_flow(
         cls,
         search_query: str,
         user_name: str,
-        user_loc: str,
-        topics_str: str,
-        time_str: str,
-        history_messages: list,
+        user_location: str,
+        formatted_topics: str,
+        formatted_current_time: str,
+        history_messages: List[BaseMessage],
         session_id: str = "",
-    ) -> Tuple[str, list]:
-        tool_logs = [
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        tool_logs: List[Dict[str, Any]] = [
             {
                 "role": "tool",
                 "content": f"🔍 [Tavily Search] Autonomously searching live web data: '{search_query}'...",
             }
         ]
-        web_data = await SearchService.asearch_general(search_query)
+        retrieved_web_data = await SearchService.asearch_general(search_query)
         await cls._save_tool_log(
-            session_id, "tavily_search", {"query": search_query}, web_data
+            session_id, "tavily_search", {"query": search_query}, retrieved_web_data
         )
 
-        sys_msg = SystemMessage(
+        system_message = SystemMessage(
             SYSTEM_PROMPT_WEB_SYNTHESIS.format(
                 user_name=user_name,
-                user_loc=user_loc,
-                topics_str=topics_str,
-                current_time_str=time_str,
+                user_loc=user_location,
+                topics_str=formatted_topics,
+                current_time_str=formatted_current_time,
             )
         )
-        web_msg = HumanMessage(
+        web_search_message = HumanMessage(
             HUMAN_PROMPT_UNTRUSTED_WEB_DATA.format(
-                query_str=search_query, search_data=web_data
+                query_str=search_query, search_data=retrieved_web_data
             )
         )
         bounded_history = cls._bound_history(history_messages)
-        reply = await cls._invoke_and_record_reply(
-            [sys_msg] + bounded_history + [web_msg],
+        assistant_reply = await cls._invoke_and_record_reply(
+            [system_message] + bounded_history + [web_search_message],
             history_messages,
             session_id=session_id,
         )
-        return reply, tool_logs
+        return assistant_reply, tool_logs
 
     @classmethod
     async def _execute_direct_flow(
         cls,
         user_name: str,
-        user_loc: str,
-        topics_str: str,
-        time_str: str,
-        history_messages: list,
+        user_location: str,
+        formatted_topics: str,
+        formatted_current_time: str,
+        history_messages: List[BaseMessage],
         session_id: str = "",
-    ) -> Tuple[str, list]:
-        sys_msg = SystemMessage(
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        system_message = SystemMessage(
             SYSTEM_PROMPT_DIRECT_CHAT.format(
                 user_name=user_name,
-                user_loc=user_loc,
-                topics_str=topics_str,
-                current_time_str=time_str,
+                user_loc=user_location,
+                topics_str=formatted_topics,
+                current_time_str=formatted_current_time,
             )
         )
         bounded_history = cls._bound_history(history_messages)
-        reply = await cls._invoke_and_record_reply(
-            [sys_msg] + bounded_history, history_messages, session_id=session_id
+        assistant_reply = await cls._invoke_and_record_reply(
+            [system_message] + bounded_history,
+            history_messages,
+            session_id=session_id,
         )
-        return reply, []
+        return assistant_reply, []
 
     @classmethod
     async def process_step(
         cls,
         user_text: str,
         state: Dict[str, Any],
-        history_messages: list,
-    ) -> Tuple[str, list]:
+        history_messages: List[BaseMessage],
+    ) -> Tuple[str, List[Dict[str, Any]]]:
         session_id = state.get("session_id") or state.get("thread_id") or ""
         history_messages.append(HumanMessage(user_text))
         await cls._save_message_memory(session_id, user_text, role="user")
@@ -227,41 +244,47 @@ class ChatController:
         await cls._update_user_context_from_history(history_messages, state)
 
         user_name = state.get("name") or "User"
-        user_loc = state.get("location") or "Not specified"
-        topics = state.get("topic_preferences") or []
-        topics_str = ", ".join(topics) if topics else "General"
-        time_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        user_location = state.get("location") or "Not specified"
+        user_topics = state.get("topic_preferences") or []
+        formatted_topics = ", ".join(user_topics) if user_topics else "General"
+        formatted_current_time = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M UTC"
+        )
 
-        decision = await cls._evaluate_prompt(user_name, user_loc, user_text)
+        decision = await cls._evaluate_prompt(user_name, user_location, user_text)
 
         if decision.declared_user_location and decision.declared_user_location.strip():
-            user_loc = decision.declared_user_location.strip()
-            state["location"] = user_loc
+            user_location = decision.declared_user_location.strip()
+            state["location"] = user_location
 
         if decision.needs_clarification and decision.clarification_question:
-            clarification = decision.clarification_question.strip()
-            history_messages.append(AIMessage(clarification))
-            await cls._save_message_memory(session_id, clarification, role="assistant")
-            return clarification, []
+            clarification_question = decision.clarification_question.strip()
+            history_messages.append(AIMessage(clarification_question))
+            await cls._save_message_memory(
+                session_id, clarification_question, role="assistant"
+            )
+            return clarification_question, []
 
-        query, is_search = cls._refine_search_query(decision, user_text, user_loc)
+        search_query, is_search_required = cls._refine_search_query(
+            decision, user_text, user_location
+        )
 
-        if is_search:
+        if is_search_required:
             return await cls._execute_search_flow(
-                query,
+                search_query,
                 user_name,
-                user_loc,
-                topics_str,
-                time_str,
+                user_location,
+                formatted_topics,
+                formatted_current_time,
                 history_messages,
                 session_id=session_id,
             )
 
         return await cls._execute_direct_flow(
             user_name,
-            user_loc,
-            topics_str,
-            time_str,
+            user_location,
+            formatted_topics,
+            formatted_current_time,
             history_messages,
             session_id=session_id,
         )
