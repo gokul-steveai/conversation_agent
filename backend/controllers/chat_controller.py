@@ -182,7 +182,7 @@ class ChatController:
             raw_chunk = chunk.content if hasattr(chunk, "content") else str(chunk)
             if isinstance(raw_chunk, list):
                 raw_chunk = " ".join(
-                    item.get("text", "") if isinstance(item, dict) else str(item)
+                    item.get("text", "") if isinstance(item, dict) else item
                     for item in raw_chunk
                 )
             if not raw_chunk:
