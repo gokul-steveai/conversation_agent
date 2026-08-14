@@ -4,6 +4,8 @@ from config import settings
 from tavily import TavilyClient
 from utils import logger
 
+from langfuse import observe
+
 
 class SearchService:
     @staticmethod
@@ -13,6 +15,7 @@ class SearchService:
         return None
 
     @classmethod
+    @observe(name="tavily_web_search", as_type="tool")
     def search_general(cls, query: str, max_results: int = 3) -> str:
         """Performs a general Tavily web search passing the query through unchanged."""
         client = cls._get_client()
@@ -42,6 +45,7 @@ class SearchService:
             return f"Web search results for: {query}."
 
     @classmethod
+    @observe(name="async_tavily_web_search", as_type="tool")
     async def asearch_general(
         cls, query: str, max_results: int = 3, timeout: float = 10.0
     ) -> str:
@@ -56,6 +60,7 @@ class SearchService:
             return f"Web search timed out for query: {query}"
 
     @classmethod
+    @observe(name="tavily_location_facts_search", as_type="tool")
     def search_location_facts(cls, location: str) -> str:
         """Searches Tavily for real-time facts, landmarks, and highlights of a location."""
         client = cls._get_client()
@@ -80,6 +85,7 @@ class SearchService:
             return f"Information about {location}."
 
     @classmethod
+    @observe(name="async_tavily_location_facts_search", as_type="tool")
     async def asearch_location_facts(cls, location: str, timeout: float = 10.0) -> str:
         """Asynchronously executes Tavily location facts search off the event loop thread with a bounded timeout."""
         try:
@@ -92,6 +98,7 @@ class SearchService:
             return f"Location facts timed out for: {location}"
 
     @classmethod
+    @observe(name="tavily_topic_news_search", as_type="tool")
     def search_topic_news(cls, topics: list[str], location: str = "") -> str:
         """Searches Tavily for live news and trending stories on specific topics."""
         client = cls._get_client()
@@ -119,6 +126,7 @@ class SearchService:
             return f"Trending news in {topics_str}."
 
     @classmethod
+    @observe(name="async_tavily_topic_news_search", as_type="tool")
     async def asearch_topic_news(
         cls, topics: list[str], location: str = "", timeout: float = 10.0
     ) -> str:

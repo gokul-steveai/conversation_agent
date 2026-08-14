@@ -12,7 +12,7 @@ from typing import (
 )
 
 import numpy as np
-from core import get_db
+from core.database import get_db
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from models.memory import BaseVectorModel

@@ -9,7 +9,15 @@ def sanitize_response(text: Union[str, List[Any]]) -> str:
         return ""
 
     if isinstance(text, list):
-        str_text = " ".join(str(item) for item in text)
+        parts: List[str] = []
+        for item in text:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and "text" in item:
+                parts.append(str(item["text"]))
+            else:
+                parts.append(str(item))
+        str_text = " ".join(parts)
     else:
         str_text = str(text)
 

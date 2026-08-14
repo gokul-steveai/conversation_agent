@@ -36,28 +36,47 @@ class OpenSourceEmbeddingService(Embeddings):
 
 
 class HuggingFaceEmbeddingService(Embeddings):
+    _shared_embeddings: Optional[Embeddings] = None
+    _shared_fallback: Optional[Embeddings] = None
+
     def __init__(
         self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     ) -> None:
+        import os
+
         self.model_name = model_name
-        self._fallback_service = OpenSourceEmbeddingService(dimension=384)
-        self._huggingface_embeddings: Optional[Embeddings] = None
 
-        try:
-            from langchain_huggingface import HuggingFaceEmbeddings
-
-            self._huggingface_embeddings = HuggingFaceEmbeddings(
-                model_name=self.model_name
+        if HuggingFaceEmbeddingService._shared_fallback is None:
+            HuggingFaceEmbeddingService._shared_fallback = OpenSourceEmbeddingService(
+                dimension=384
             )
-        except Exception:
-            try:
-                from langchain_community.embeddings import HuggingFaceEmbeddings
 
-                self._huggingface_embeddings = HuggingFaceEmbeddings(
-                    model_name=self.model_name
+        if HuggingFaceEmbeddingService._shared_embeddings is None:
+            hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN", "")
+            model_kwargs = {"token": hf_token} if hf_token else {}
+
+            try:
+                from langchain_huggingface import HuggingFaceEmbeddings
+
+                HuggingFaceEmbeddingService._shared_embeddings = HuggingFaceEmbeddings(
+                    model_name=self.model_name,
+                    model_kwargs=model_kwargs if model_kwargs else None,
                 )
             except Exception:
-                pass
+                try:
+                    from langchain_community.embeddings import HuggingFaceEmbeddings
+
+                    HuggingFaceEmbeddingService._shared_embeddings = (
+                        HuggingFaceEmbeddings(
+                            model_name=self.model_name,
+                            model_kwargs=model_kwargs if model_kwargs else None,
+                        )
+                    )
+                except Exception:
+                    pass
+
+        self._fallback_service = HuggingFaceEmbeddingService._shared_fallback
+        self._huggingface_embeddings = HuggingFaceEmbeddingService._shared_embeddings
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         if self._huggingface_embeddings is not None:

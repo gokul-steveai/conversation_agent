@@ -1,6 +1,6 @@
 from typing import AsyncContextManager, Callable, List, Optional
 
-from core import get_db
+from core.database import get_db
 from models.memory import (
     AgentContextSummaryModel,
     AgentConversationalHistoryModel,

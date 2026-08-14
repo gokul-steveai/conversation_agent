@@ -40,6 +40,7 @@ class AuthUI:
             "user_name",
             "user_email",
             "current_session_id",
+            "session_selector_widget",
             "state",
             "messages",
             "history_messages",
@@ -122,7 +123,7 @@ class AuthUI:
                     padding: 32px 40px;
                     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
                     max-width: 480px;
-                    margin: 40px auto;
+                    margin: 20px auto;
                 }
                 .auth-title {
                     font-size: 1.8rem; font-weight: 700; color: #f8fafc; margin-bottom: 8px; text-align: center;
@@ -140,8 +141,6 @@ class AuthUI:
                 """
                 <div class="auth-card">
                     <div class="auth-title">⚡ Conversation Agent</div>
-                    <div class="auth-subtitle">Enterprise AI Assistant</div>
-
                 </div>
                 """,
                 unsafe_allow_html=True,

@@ -40,6 +40,11 @@ class Settings(BaseModel):
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 1440  # 24 Hours
     default_temperature: float = 0.0
+    hf_token: str = Field(
+        default_factory=lambda: (
+            os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN", "")
+        )
+    )
 
     @model_validator(mode="after")
     def validate_cors_allowlist(self) -> "Settings":

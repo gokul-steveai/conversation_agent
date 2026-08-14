@@ -1,6 +1,6 @@
 from typing import AsyncContextManager, Callable, List, Optional, Type
 
-from core import get_db
+from core.database import get_db
 from models.memory import BaseVectorModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

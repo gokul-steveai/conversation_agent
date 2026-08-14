@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class StateUpdate(BaseModel):
@@ -12,20 +12,27 @@ class StateUpdate(BaseModel):
         default=None,
         description="Most specific, refined city or location explicitly declared by user in conversation.",
     )
-    topics: List[str] = Field(
+    topics: Optional[List[str]] = Field(
         default_factory=list,
         description="All topics/interests identified or confirmed in conversation",
     )
+
+    @field_validator("topics", mode="before")
+    @classmethod
+    def _coerce_null_topics(cls, v: Any) -> List[str]:
+        if v is None:
+            return []
+        return v
 
 
 class ChatDecision(BaseModel):
     needs_clarification: bool = Field(
         default=False,
-        description="True if the user prompt is missing essential context or parameters (e.g. location for local weather/news when location is missing, dates, specific entity) required to answer accurately.",
+        description="True ONLY if an actionable parameter-dependent request is missing mandatory parameters (e.g. asking for local weather when location is 'Not specified' and no city is provided). NEVER set True for general, historical, educational, or conversational questions.",
     )
     clarification_question: Optional[str] = Field(
         default=None,
-        description="The polite, friendly clarification question to ask the user if essential context is missing.",
+        description="The polite, friendly clarification question to ask the user ONLY if essential location/action parameters are missing.",
     )
     needs_web_search: bool = Field(
         default=False,
@@ -45,9 +52,25 @@ class ChatDecision(BaseModel):
         default=None,
         description="User home/current location explicitly declared by user (e.g., 'I live in Paris', 'My location is London')",
     )
-    extracted_topics: List[str] = Field(
+    extracted_topics: Optional[List[str]] = Field(
         default_factory=list, description="Topics/interests mentioned in prompt if any"
     )
+
+    @field_validator("extracted_topics", mode="before")
+    @classmethod
+    def _coerce_null_extracted_topics(cls, v: Any) -> List[str]:
+        if v is None:
+            return []
+        return v
+
+    @field_validator("needs_clarification", "needs_web_search", mode="before")
+    @classmethod
+    def _coerce_null_bool(cls, v: Any) -> bool:
+        if v is None:
+            return False
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "yes")
+        return bool(v)
 
 
 class ChatMessageRequest(BaseModel):

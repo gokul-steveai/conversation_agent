@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
-from core.database import DatabaseManager
+from core.database import DatabaseManager, get_db
 from core.llm_factory import ainvoke_structured, llm
 from core.observability import langfuse_handler
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -15,12 +15,14 @@ from schemas.schemas import ChatDecision, StateUpdate
 from services import MemoryService, SearchService
 from utils import sanitize_response
 
+from langfuse import observe
+
 
 class ChatController:
     @classmethod
     def _get_memory_service(cls) -> Optional[MemoryService]:
         if DatabaseManager._SessionLocal:
-            return MemoryService(DatabaseManager._SessionLocal)
+            return MemoryService(get_db)
         return None
 
     @classmethod
@@ -65,20 +67,12 @@ class ChatController:
     def _bound_history(
         cls, history_messages: List[BaseMessage], max_recent: int = 12
     ) -> List[BaseMessage]:
-        if len(history_messages) <= max_recent:
-            return history_messages
-
-        system_messages = [
-            message
-            for message in history_messages
-            if isinstance(message, SystemMessage)
-        ]
         non_system_messages = [
             message
             for message in history_messages
             if not isinstance(message, SystemMessage)
         ]
-        return system_messages + non_system_messages[-max_recent:]
+        return non_system_messages[-max_recent:]
 
     @classmethod
     async def _update_user_context_from_history(
@@ -109,18 +103,23 @@ class ChatController:
             pass
 
     @classmethod
+    @observe(name="evaluate_search_decision", as_type="chain")
     async def _evaluate_prompt(
-        cls, user_name: str, user_location: str, user_text: str
+        cls,
+        user_name: str,
+        user_location: str,
+        user_text: str,
+        history_messages: List[BaseMessage],
     ) -> ChatDecision:
-        evaluation_messages = [
-            SystemMessage(
-                SYSTEM_PROMPT_SEARCH_EVALUATION.format(
-                    user_name=user_name,
-                    user_loc=user_location,
-                    user_text=user_text,
-                )
+        bounded_history = cls._bound_history(history_messages, max_recent=6)
+        system_msg = SystemMessage(
+            SYSTEM_PROMPT_SEARCH_EVALUATION.format(
+                user_name=user_name,
+                user_loc=user_location,
+                user_text=user_text,
             )
-        ]
+        )
+        evaluation_messages = [system_msg] + bounded_history
         return await ainvoke_structured(llm, ChatDecision, evaluation_messages)
 
     @classmethod
@@ -170,6 +169,7 @@ class ChatController:
         return assistant_reply
 
     @classmethod
+    @observe(name="execute_search_flow", as_type="chain")
     async def _execute_search_flow(
         cls,
         search_query: str,
@@ -213,6 +213,7 @@ class ChatController:
         return assistant_reply, tool_logs
 
     @classmethod
+    @observe(name="execute_direct_flow", as_type="chain")
     async def _execute_direct_flow(
         cls,
         user_name: str,
@@ -239,19 +240,11 @@ class ChatController:
         return assistant_reply, []
 
     @classmethod
-    async def process_step(
-        cls,
-        user_text: str,
-        state: Dict[str, Any],
-        history_messages: List[BaseMessage],
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+    def _prepare_user_context(
+        cls, state: Dict[str, Any]
+    ) -> Tuple[str, str, str, str, str]:
         session_id_val = state.get("session_id") or state.get("thread_id") or ""
         session_id = session_id_val if isinstance(session_id_val, str) else ""
-
-        history_messages.append(HumanMessage(user_text))
-        await cls._save_message_memory(session_id, user_text, role="user")
-
-        await cls._update_user_context_from_history(history_messages, state)
 
         user_name_val = state.get("name") or "User"
         user_name = user_name_val if isinstance(user_name_val, str) else "User"
@@ -267,12 +260,59 @@ class ChatController:
         formatted_current_time = datetime.now(timezone.utc).strftime(
             "%Y-%m-%d %H:%M UTC"
         )
+        return (
+            session_id,
+            user_name,
+            user_location,
+            formatted_topics,
+            formatted_current_time,
+        )
 
-        decision = await cls._evaluate_prompt(user_name, user_location, user_text)
+    @classmethod
+    @observe(name="chat_controller_process_step")
+    async def process_step(
+        cls,
+        user_text: str,
+        state: Dict[str, Any],
+        history_messages: List[BaseMessage],
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        history_messages.append(HumanMessage(user_text))
+        await cls._update_user_context_from_history(history_messages, state)
+
+        (
+            session_id,
+            user_name,
+            user_location,
+            formatted_topics,
+            formatted_current_time,
+        ) = cls._prepare_user_context(state)
+
+        await cls._save_message_memory(session_id, user_text, role="user")
+
+        decision = await cls._evaluate_prompt(
+            user_name, user_location, user_text, history_messages
+        )
 
         if decision.declared_user_location and decision.declared_user_location.strip():
             user_location = decision.declared_user_location.strip()
             state["location"] = user_location
+
+        if decision.extracted_name and decision.extracted_name.strip():
+            user_name = decision.extracted_name.strip()
+            state["name"] = user_name
+
+        if decision.extracted_topics:
+            existing_topics_raw = state.get("topic_preferences", [])
+            existing_topics: List[str] = (
+                existing_topics_raw if isinstance(existing_topics_raw, list) else []
+            )
+            new_topics = [
+                topic.strip() for topic in decision.extracted_topics if topic.strip()
+            ]
+            if new_topics:
+                state["topic_preferences"] = list(
+                    dict.fromkeys(existing_topics + new_topics)
+                )
 
         if decision.needs_clarification and decision.clarification_question:
             clarification_question = decision.clarification_question.strip()
@@ -305,3 +345,136 @@ class ChatController:
             history_messages,
             session_id=session_id,
         )
+
+    @classmethod
+    async def _stream_and_record_reply(
+        cls,
+        messages: List[BaseMessage],
+        history_messages: List[BaseMessage],
+        session_id: str = "",
+    ) -> AsyncGenerator[str, None]:
+        full_reply_parts = []
+        async for chunk in llm.astream(
+            messages, config={"callbacks": [langfuse_handler]}
+        ):
+            raw_chunk = chunk.content if hasattr(chunk, "content") else str(chunk)
+            if isinstance(raw_chunk, list):
+                raw_chunk = " ".join(
+                    item.get("text", "") if isinstance(item, dict) else item
+                    for item in raw_chunk
+                )
+            if raw_chunk:
+                full_reply_parts.append(raw_chunk)
+                yield raw_chunk
+
+        full_raw_reply = "".join(full_reply_parts)
+        assistant_reply = sanitize_response(full_raw_reply)
+        history_messages.append(AIMessage(assistant_reply))
+        await cls._save_message_memory(session_id, assistant_reply, role="assistant")
+
+    @classmethod
+    @observe(name="chat_controller_process_step_stream")
+    async def process_step_stream(
+        cls,
+        user_text: str,
+        state: Dict[str, Any],
+        history_messages: List[BaseMessage],
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        history_messages.append(HumanMessage(user_text))
+        await cls._update_user_context_from_history(history_messages, state)
+
+        (
+            session_id,
+            user_name,
+            user_location,
+            formatted_topics,
+            formatted_current_time,
+        ) = cls._prepare_user_context(state)
+
+        await cls._save_message_memory(session_id, user_text, role="user")
+
+        decision = await cls._evaluate_prompt(
+            user_name, user_location, user_text, history_messages
+        )
+
+        if decision.declared_user_location and decision.declared_user_location.strip():
+            user_location = decision.declared_user_location.strip()
+            state["location"] = user_location
+
+        if decision.extracted_name and decision.extracted_name.strip():
+            user_name = decision.extracted_name.strip()
+            state["name"] = user_name
+
+        if decision.extracted_topics:
+            existing_topics_raw = state.get("topic_preferences", [])
+            existing_topics: List[str] = (
+                existing_topics_raw if isinstance(existing_topics_raw, list) else []
+            )
+            new_topics = [
+                topic.strip() for topic in decision.extracted_topics if topic.strip()
+            ]
+            if new_topics:
+                state["topic_preferences"] = list(
+                    dict.fromkeys(existing_topics + new_topics)
+                )
+
+        yield {"type": "state", "updated_state": state}
+
+        if decision.needs_clarification and decision.clarification_question:
+            clarification_question = decision.clarification_question.strip()
+            history_messages.append(AIMessage(clarification_question))
+            await cls._save_message_memory(
+                session_id, clarification_question, role="assistant"
+            )
+            yield {"type": "token", "content": clarification_question}
+            return
+
+        search_query, is_search_required = cls._refine_search_query(
+            decision, user_text, user_location
+        )
+
+        if is_search_required:
+            tool_msg = f"🔍 [Tavily Search] Autonomously searching live web data: '{search_query}'..."
+            yield {"type": "tool", "content": tool_msg}
+
+            retrieved_web_data = await SearchService.asearch_general(search_query)
+            await cls._save_tool_log(
+                session_id, "tavily_search", {"query": search_query}, retrieved_web_data
+            )
+
+            system_message = SystemMessage(
+                SYSTEM_PROMPT_WEB_SYNTHESIS.format(
+                    user_name=user_name,
+                    user_loc=user_location,
+                    topics_str=formatted_topics,
+                    current_time_str=formatted_current_time,
+                )
+            )
+            web_search_message = HumanMessage(
+                HUMAN_PROMPT_UNTRUSTED_WEB_DATA.format(
+                    query_str=search_query, search_data=retrieved_web_data
+                )
+            )
+            bounded_history = cls._bound_history(history_messages)
+            async for token_chunk in cls._stream_and_record_reply(
+                [system_message] + bounded_history + [web_search_message],
+                history_messages,
+                session_id=session_id,
+            ):
+                yield {"type": "token", "content": token_chunk}
+        else:
+            system_message = SystemMessage(
+                SYSTEM_PROMPT_DIRECT_CHAT.format(
+                    user_name=user_name,
+                    user_loc=user_location,
+                    topics_str=formatted_topics,
+                    current_time_str=formatted_current_time,
+                )
+            )
+            bounded_history = cls._bound_history(history_messages)
+            async for token_chunk in cls._stream_and_record_reply(
+                [system_message] + bounded_history,
+                history_messages,
+                session_id=session_id,
+            ):
+                yield {"type": "token", "content": token_chunk}

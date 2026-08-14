@@ -11,7 +11,7 @@ from typing import (
     Union,
 )
 
-from core import get_db
+from core.database import get_db
 from core.llm_factory import llm as default_llm
 from langchain_core.language_models import BaseLanguageModel
 from models import (

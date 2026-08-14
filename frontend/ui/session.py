@@ -22,6 +22,7 @@ class SessionManager:
                 detail = APIClient.load_session(latest_id, user_id)
                 if detail:
                     st.session_state.current_session_id = detail["session_id"]
+                    st.session_state.session_selector_widget = detail["session_id"]
                     state = detail.get("state", {})
                     state["user_id"] = user_id
                     if user_name and not state.get("name"):
@@ -36,6 +37,7 @@ class SessionManager:
             detail = APIClient.create_session(user_id, title="New Chat Session")
             if detail:
                 st.session_state.current_session_id = detail["session_id"]
+                st.session_state.session_selector_widget = detail["session_id"]
                 state = detail.get("state", {})
                 state["user_id"] = user_id
                 if user_name and not state.get("name"):
@@ -52,6 +54,7 @@ class SessionManager:
         if detail:
             new_id = detail["session_id"]
             st.session_state.current_session_id = new_id
+            st.session_state.session_selector_widget = new_id
             state = detail.get("state", {})
             state["user_id"] = user_id
             if user_name and not state.get("name"):
@@ -71,6 +74,7 @@ class SessionManager:
         detail = APIClient.load_session(session_id, user_id)
         if detail:
             st.session_state.current_session_id = detail["session_id"]
+            st.session_state.session_selector_widget = detail["session_id"]
             state = detail.get("state", {})
             state["user_id"] = user_id
             st.session_state.state = state
@@ -86,4 +90,6 @@ class SessionManager:
             if success:
                 if "current_session_id" in st.session_state:
                     del st.session_state.current_session_id
+                if "session_selector_widget" in st.session_state:
+                    del st.session_state.session_selector_widget
                 SessionManager.init_session()

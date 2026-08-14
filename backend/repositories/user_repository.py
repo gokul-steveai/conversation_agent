@@ -1,6 +1,6 @@
 from typing import Optional
 
-from core import get_db
+from core.database import get_db
 from models import UserModel
 from sqlalchemy import select
 from utils import logger

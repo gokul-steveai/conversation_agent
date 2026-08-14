@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from core import get_db
+from core.database import get_db
 from models import SessionModel
 from repositories import IBaseRepository
 from sqlalchemy import select
