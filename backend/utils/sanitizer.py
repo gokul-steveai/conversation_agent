@@ -23,11 +23,18 @@ def sanitize_response(text: Union[str, List[Any]]) -> str:
 
     cleaned = str_text
     leakage_patterns = [
-        r"^based on (?:the )?(?:untrusted )?(?:retrieved )?web data,?\s*",
+        # System disclaimers & pipeline leakage
+        r"^based on (?:the )?(?:untrusted )?(?:retrieved )?(?:live )?web data,?\s*",
         r"^based on the provided data,?\s*",
         r"note that this information is based on untrusted.*$",
         r"note that the provided data is limited.*$",
         r"as of my knowledge cutoff in \d{4},?\s*",
+        # Social media & website CTA boilerplates
+        r"(?:don't|do not) forget to (?:like|share|subscribe)[^\n\.]*[\n\.]?",
+        r"subscribe (?:to|for) (?:daily|more|our)[^\n\.]*[\n\.]?",
+        r"catch (?:all )?(?:the )?live updates[^\n\.]*on our platform[^\n\.]*[\n\.]?",
+        r"keep an eye on our (?:platform|channel)[^\n\.]*[\n\.]?",
+        r"click (?:the link|here) (?:below|to subscribe)[^\n\.]*[\n\.]?",
     ]
     for leak_pat in leakage_patterns:
         cleaned = re.sub(

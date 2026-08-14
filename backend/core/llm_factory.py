@@ -1,4 +1,3 @@
-import re
 from typing import Optional, Sequence, Type, TypeVar, cast
 
 from config.settings import settings
@@ -6,6 +5,7 @@ from core.observability import langfuse_handler
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, SecretStr
+from utils.json_utils import extract_json_from_failed_generation
 from utils.logger import logger
 
 T = TypeVar("T", bound=BaseModel)
@@ -26,27 +26,6 @@ class LLMFactory:
 
 
 llm = LLMFactory.get_llm()
-
-
-def extract_json_from_failed_generation(
-    error_msg: str, schema_cls: Type[T]
-) -> Optional[T]:
-    match = re.search(
-        r"<function=[^>]+>\s*(\{.*?\})\s*</function>", error_msg, re.DOTALL
-    )
-    if match:
-        try:
-            return schema_cls.model_validate_json(match.group(1))
-        except Exception:
-            pass
-
-    json_match = re.search(r"(\{.*\})", error_msg, re.DOTALL)
-    if json_match:
-        try:
-            return schema_cls.model_validate_json(json_match.group(1))
-        except Exception:
-            pass
-    return None
 
 
 async def ainvoke_structured(
@@ -73,11 +52,28 @@ async def ainvoke_structured(
         logger.warning(
             f"Retrying {schema_cls.__name__} with json_mode fallback due to Groq error: {e}"
         )
-        json_sys_msg = SystemMessage(
-            f"Respond exclusively in JSON format matching the schema for {schema_cls.__name__}."
-        )
-        json_llm = llm_instance.with_structured_output(schema_cls, method="json_mode")
-        res = await json_llm.ainvoke(
-            [json_sys_msg] + list(messages), config={"callbacks": [langfuse_handler]}
-        )
-        return cast(T, res)
+        try:
+            json_sys_msg = SystemMessage(
+                f"Respond exclusively in JSON format matching the schema for {schema_cls.__name__}. Do not use Python triple quotes or extra fields."
+            )
+            json_llm = llm_instance.with_structured_output(
+                schema_cls, method="json_mode"
+            )
+            res = await json_llm.ainvoke(
+                [json_sys_msg] + list(messages),
+                config={"callbacks": [langfuse_handler]},
+            )
+            return cast(T, res)
+        except Exception as retry_err:
+            retry_err_str = str(retry_err)
+            recovered = extract_json_from_failed_generation(retry_err_str, schema_cls)
+            if recovered is not None:
+                logger.info(
+                    f"Successfully recovered {schema_cls.__name__} from Groq json_mode retry error."
+                )
+                return recovered
+
+            logger.error(
+                f"Failed to generate structured output for {schema_cls.__name__}: {retry_err}. Falling back to default schema instance."
+            )
+            return schema_cls()

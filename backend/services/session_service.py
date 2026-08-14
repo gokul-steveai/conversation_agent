@@ -26,9 +26,16 @@ from utils import logger, sanitize_response
 
 
 class SessionService:
+    def __init__(
+        self,
+        session_repo: SessionRepository,
+        user_repo: UserRepository,
+    ):
+        self._session_repo = session_repo
+        self._user_repo = user_repo
+
     @classmethod
     def serialize_messages(cls, messages: Sequence[BaseMessage]) -> str:
-        """Serializes complete LangChain BaseMessage objects into JSON preserving tool_calls, IDs, and metadata."""
         message_dicts = messages_to_dict(messages)
         return json.dumps(message_dicts)
 
@@ -165,9 +172,8 @@ class SessionService:
             existing_title=existing_title,
         )
 
-    @classmethod
     async def create_session(
-        cls,
+        self,
         request_or_user_id: Union[CreateSessionRequest, str],
         title: str = "New Chat Session",
     ) -> SessionDetailResponse:
@@ -181,7 +187,7 @@ class SessionService:
         if not user_id:
             raise ValueError("user_id must be provided to create a session.")
 
-        await UserRepository.get_or_create_user(user_id=user_id)
+        await self._user_repo.get_or_create_user(user_id=user_id)
 
         session_id = str(uuid.uuid4())
         current_time_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -206,13 +212,13 @@ class SessionService:
             AIMessage(DEFAULT_GREETING),
         ]
 
-        await SessionRepository.save_entity(
+        await self._session_repo.save_entity(
             session_id=session_id,
             user_id=user_id,
             title=session_title,
             state_json=json.dumps(initial_state),
             messages_json=json.dumps(initial_messages),
-            history_json=cls.serialize_messages(initial_history),
+            history_json=self.serialize_messages(initial_history),
         )
 
         return SessionDetailResponse(
@@ -224,24 +230,23 @@ class SessionService:
             history_messages=initial_history,
         )
 
-    @classmethod
-    async def save_session(cls, request: SaveSessionRequest) -> None:
+    async def save_session(self, request: SaveSessionRequest) -> None:
         if not request.user_id:
             raise ValueError("user_id must be provided to save a session.")
 
-        existing = await SessionRepository.find_by_session_and_user_id(
+        existing = await self._session_repo.find_by_session_and_user_id(
             request.session_id, request.user_id
         )
         existing_title = existing.title if existing else ""
 
-        title = await cls.generate_llm_title(
+        title = await self.generate_llm_title(
             request.messages, existing_title=existing_title
         )
         state_json = json.dumps(request.state)
         messages_json = json.dumps(request.messages)
-        history_json = cls.serialize_messages(request.history_messages)
+        history_json = self.serialize_messages(request.history_messages)
 
-        await SessionRepository.save_entity(
+        await self._session_repo.save_entity(
             session_id=request.session_id,
             user_id=request.user_id,
             title=title,
@@ -250,18 +255,17 @@ class SessionService:
             history_json=history_json,
         )
 
-    @classmethod
     async def load_session(
-        cls, session_id: str, user_id: str
+        self, session_id: str, user_id: str
     ) -> Optional[SessionDetailResponse]:
         if not user_id:
             raise ValueError("user_id must be provided to load a session.")
 
-        row = await SessionRepository.find_by_session_and_user_id(session_id, user_id)
+        row = await self._session_repo.find_by_session_and_user_id(session_id, user_id)
         if row:
             state = json.loads(row.state_json)
             messages = json.loads(row.messages_json)
-            history_messages = cls.deserialize_messages(row.history_json)
+            history_messages = self.deserialize_messages(row.history_json)
             return SessionDetailResponse(
                 session_id=row.session_id,
                 user_id=row.user_id,
@@ -272,12 +276,11 @@ class SessionService:
             )
         return None
 
-    @classmethod
-    async def list_sessions(cls, user_id: str) -> List[SessionResponse]:
+    async def list_sessions(self, user_id: str) -> List[SessionResponse]:
         if not user_id:
             raise ValueError("user_id must be provided to list sessions.")
 
-        rows = await SessionRepository.find_all_by_user(user_id)
+        rows = await self._session_repo.find_all_by_user(user_id)
         sessions = []
         for row in rows:
             created_str = (
@@ -301,9 +304,8 @@ class SessionService:
             )
         return sessions
 
-    @classmethod
-    async def delete_session(cls, session_id: str, user_id: str) -> None:
+    async def delete_session(self, session_id: str, user_id: str) -> None:
         if not user_id:
             raise ValueError("user_id must be provided to delete a session.")
 
-        await SessionRepository.delete_by_session_id_and_user_id(session_id, user_id)
+        await self._session_repo.delete_by_session_id_and_user_id(session_id, user_id)

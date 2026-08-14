@@ -3,15 +3,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import (
     Any,
-    AsyncContextManager,
-    Callable,
     Dict,
     List,
     Optional,
     Union,
 )
 
-from core.database import get_db
 from core.llm_factory import llm as default_llm
 from langchain_core.language_models import BaseLanguageModel
 from models import (
@@ -23,7 +20,7 @@ from models import (
     AgentToolExecutionLogModel,
     AgentWorkflowPatternModel,
 )
-from repositories.memory_repository import MemoryRepository
+from repositories import MemoryRepository, VectorStoreRepository
 from schemas import (
     CreateSessionRequest,
     SaveSessionRequest,
@@ -33,25 +30,7 @@ from schemas import (
 from services.embedding_service import HuggingFaceEmbeddingService
 from services.session_service import SessionService
 from services.vector_store_service import VectorStoreService
-from sqlalchemy.ext.asyncio import AsyncSession
-from utils.logger import logger
-
-
-def _extract_text_content(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: List[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and "text" in item:
-                parts.append(str(item["text"]))
-        return "\n".join(parts)
-    return str(content)
-
-
-MODEL_TOKEN_LIMITS = {"llama-3.3-70b-versatile": 128000}
+from utils import extract_text_content, logger
 
 
 class MemoryService:
@@ -59,15 +38,13 @@ class MemoryService:
 
     def __init__(
         self,
-        session_factory: Optional[
-            Callable[[], AsyncContextManager[AsyncSession]]
-        ] = None,
-        memory_repository: Optional[MemoryRepository] = None,
+        memory_repository: MemoryRepository,
+        vector_repository: VectorStoreRepository,
+        session_service: Optional[SessionService] = None,
     ) -> None:
-        self.session_factory = session_factory or get_db
-        self.memory_repository = memory_repository or MemoryRepository(
-            self.session_factory
-        )
+        self._memory_repository = memory_repository
+        self._vector_repository = vector_repository
+        self._session_service = session_service
 
         if MemoryService._shared_embedding_service is None:
             MemoryService._shared_embedding_service = HuggingFaceEmbeddingService()
@@ -79,11 +56,44 @@ class MemoryService:
         self._entity_vs: Optional[VectorStoreService] = None
         self._summary_vs: Optional[VectorStoreService] = None
 
+    # --- Session Operations ---
+    async def create_session(
+        self, request: CreateSessionRequest
+    ) -> SessionDetailResponse:
+        if not self._session_service:
+            raise RuntimeError("SessionService was not injected into MemoryService.")
+        return await self._session_service.create_session(request)
+
+    async def save_session(
+        self,
+        request: SaveSessionRequest,
+    ) -> None:
+        if not self._session_service:
+            raise RuntimeError("SessionService was not injected into MemoryService.")
+        await self._session_service.save_session(request)
+
+    async def load_session(
+        self, session_id: str, user_id: str
+    ) -> Optional[SessionDetailResponse]:
+        if not self._session_service:
+            raise RuntimeError("SessionService was not injected into MemoryService.")
+        return await self._session_service.load_session(session_id, user_id)
+
+    async def list_sessions(self, user_id: str) -> List[SessionResponse]:
+        if not self._session_service:
+            raise RuntimeError("SessionService was not injected into MemoryService.")
+        return await self._session_service.list_sessions(user_id)
+
+    async def delete_session(self, session_id: str, user_id: str) -> None:
+        if not self._session_service:
+            raise RuntimeError("SessionService was not injected into MemoryService.")
+        await self._session_service.delete_session(session_id, user_id)
+
     @property
     def knowledge_base_vs(self) -> VectorStoreService:
         if self._knowledge_base_vs is None:
             self._knowledge_base_vs = VectorStoreService(
-                session_factory=self.session_factory,
+                vector_repository=self._vector_repository,
                 model_cls=AgentKnowledgeBaseVectorModel,
                 embedding_function=self._embedding_function,
             )
@@ -93,7 +103,7 @@ class MemoryService:
     def workflow_vs(self) -> VectorStoreService:
         if self._workflow_vs is None:
             self._workflow_vs = VectorStoreService(
-                session_factory=self.session_factory,
+                vector_repository=self._vector_repository,
                 model_cls=AgentWorkflowPatternModel,
                 embedding_function=self._embedding_function,
             )
@@ -103,7 +113,7 @@ class MemoryService:
     def toolbox_vs(self) -> VectorStoreService:
         if self._toolbox_vs is None:
             self._toolbox_vs = VectorStoreService(
-                session_factory=self.session_factory,
+                vector_repository=self._vector_repository,
                 model_cls=AgentToolboxDefinitionModel,
                 embedding_function=self._embedding_function,
             )
@@ -113,7 +123,7 @@ class MemoryService:
     def entity_vs(self) -> VectorStoreService:
         if self._entity_vs is None:
             self._entity_vs = VectorStoreService(
-                session_factory=self.session_factory,
+                vector_repository=self._vector_repository,
                 model_cls=AgentEntitiesRegistryModel,
                 embedding_function=self._embedding_function,
             )
@@ -123,39 +133,11 @@ class MemoryService:
     def summary_vs(self) -> VectorStoreService:
         if self._summary_vs is None:
             self._summary_vs = VectorStoreService(
-                session_factory=self.session_factory,
+                vector_repository=self._vector_repository,
                 model_cls=AgentContextSummaryModel,
                 embedding_function=self._embedding_function,
             )
         return self._summary_vs
-
-    # --- Session Operations ---
-    @classmethod
-    async def create_session(
-        cls, request: CreateSessionRequest
-    ) -> SessionDetailResponse:
-        return await SessionService.create_session(request)
-
-    @classmethod
-    async def save_session(
-        cls,
-        request: SaveSessionRequest,
-    ) -> None:
-        await SessionService.save_session(request)
-
-    @classmethod
-    async def load_session(
-        cls, session_id: str, user_id: str
-    ) -> Optional[SessionDetailResponse]:
-        return await SessionService.load_session(session_id, user_id)
-
-    @classmethod
-    async def list_sessions(cls, user_id: str) -> List[SessionResponse]:
-        return await SessionService.list_sessions(user_id)
-
-    @classmethod
-    async def delete_session(cls, session_id: str, user_id: str) -> None:
-        await SessionService.delete_session(session_id, user_id)
 
     # --- Memory Operations ---
     async def write_conversational_memory(
@@ -171,10 +153,10 @@ class MemoryService:
             timestamp=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
         )
-        return await self.memory_repository.save_conversational_history(entry)
+        return await self._memory_repository.save_conversational_history(entry)
 
     async def read_conversational_memory(self, thread_id: str, limit: int = 10) -> str:
-        entries = await self.memory_repository.get_recent_unsummarized_messages(
+        entries = await self._memory_repository.get_recent_unsummarized_messages(
             thread_id, limit=limit
         )
         messages = [f"[{e.role}] {e.content}" for e in entries]
@@ -184,7 +166,7 @@ class MemoryService:
     async def mark_as_summarized(
         self, thread_id: str, summary_id: str, message_ids: Optional[List[str]] = None
     ) -> None:
-        await self.memory_repository.mark_messages_summarized(
+        await self._memory_repository.mark_messages_summarized(
             thread_id, summary_id, message_ids=message_ids
         )
 
@@ -223,12 +205,12 @@ class MemoryService:
             timestamp=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
         )
-        return await self.memory_repository.save_tool_execution_log(entry)
+        return await self._memory_repository.save_tool_execution_log(entry)
 
     async def read_tool_logs(
         self, thread_id: str, limit: int = 20
     ) -> List[Dict[str, Any]]:
-        rows = await self.memory_repository.get_tool_execution_logs(
+        rows = await self._memory_repository.get_tool_execution_logs(
             thread_id, limit=limit
         )
         logs: List[Dict[str, Any]] = []
@@ -252,6 +234,68 @@ class MemoryService:
                 }
             )
         return logs
+
+    async def write_summary(
+        self,
+        summary_id: str,
+        full_content: str,
+        summary: str,
+        description: str,
+        thread_id: Optional[str] = None,
+    ) -> str:
+        summary_model = AgentContextSummaryModel(
+            id=summary_id,
+            content=full_content,
+            embedding=json.dumps([]),
+            metadata_json=json.dumps(
+                {
+                    "summary": summary,
+                    "description": description,
+                    "thread_id": thread_id or "",
+                }
+            ),
+            created_at=datetime.now(timezone.utc),
+        )
+        await self._memory_repository.save_context_summary(summary_model)
+
+        meta: Dict[str, Any] = {
+            "id": summary_id,
+            "summary": summary,
+            "description": description,
+        }
+        if thread_id:
+            meta["thread_id"] = thread_id
+        await self.summary_vs.add_texts([f"{summary_id}: {description}"], [meta])
+        return summary_id
+
+    async def read_summary_memory(
+        self, summary_id: str, thread_id: Optional[str] = None
+    ) -> str:
+        record = await self._memory_repository.get_context_summary_by_id(summary_id)
+        if record:
+            try:
+                meta = json.loads(record.metadata_json or "{}")
+                if "summary" in meta:
+                    return str(meta["summary"])
+            except Exception:
+                pass
+            return str(record.content)
+        return f"Summary {summary_id} not found."
+
+    async def read_conversations_by_summary_id(self, summary_id: str) -> str:
+        rows = await self._memory_repository.get_messages_by_summary_id(summary_id)
+        if not rows:
+            return f"No conversations found for summary_id: {summary_id}"
+
+        lines = [f"## Expanded Conversations for Summary ID: {summary_id}"]
+        for e in rows:
+            ts_str = (
+                e.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                if hasattr(e.timestamp, "strftime")
+                else (str(e.timestamp) if e.timestamp else "Unknown")
+            )
+            lines.append(f"[{ts_str}] [{e.role.upper()}]\n{e.content}\n")
+        return "\n".join(lines)
 
     async def write_knowledge_base(
         self,
@@ -330,7 +374,8 @@ class MemoryService:
         try:
             res = await active_llm.ainvoke(prompt)
             raw_content = res.content if hasattr(res, "content") else res
-            content = _extract_text_content(raw_content)
+            content = extract_text_content(raw_content)
+
             start, end = content.find("["), content.rfind("]")
             if start != -1 and end != -1:
                 parsed = json.loads(content[start : end + 1])
@@ -401,89 +446,6 @@ class MemoryService:
         formatted = "\n".join(entities) or "(No entities found.)"
         return f"## Entity Memory\n{formatted}"
 
-    async def write_summary(
-        self,
-        summary_id: str,
-        full_content: str,
-        summary: str,
-        description: str,
-        thread_id: Optional[str] = None,
-    ) -> str:
-        summary_model = AgentContextSummaryModel(
-            id=summary_id,
-            content=full_content,
-            embedding=json.dumps([]),
-            metadata_json=json.dumps(
-                {
-                    "summary": summary,
-                    "description": description,
-                    "thread_id": thread_id or "",
-                }
-            ),
-            created_at=datetime.now(timezone.utc),
-        )
-        await self.memory_repository.save_context_summary(summary_model)
-
-        meta: Dict[str, Any] = {
-            "id": summary_id,
-            "summary": summary,
-            "description": description,
-        }
-        if thread_id:
-            meta["thread_id"] = thread_id
-        await self.summary_vs.add_texts([f"{summary_id}: {description}"], [meta])
-        return summary_id
-
-    async def read_summary_memory(
-        self, summary_id: str, thread_id: Optional[str] = None
-    ) -> str:
-        record = await self.memory_repository.get_context_summary_by_id(summary_id)
-        if record:
-            try:
-                meta = json.loads(record.metadata_json or "{}")
-                if "summary" in meta:
-                    return str(meta["summary"])
-            except Exception:
-                pass
-            return str(record.content)
-        return f"Summary {summary_id} not found."
-
-    async def read_conversations_by_summary_id(self, summary_id: str) -> str:
-        rows = await self.memory_repository.get_messages_by_summary_id(summary_id)
-        if not rows:
-            return f"No conversations found for summary_id: {summary_id}"
-
-        lines = [f"## Expanded Conversations for Summary ID: {summary_id}"]
-        for e in rows:
-            ts_str = (
-                e.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-                if hasattr(e.timestamp, "strftime")
-                else (str(e.timestamp) if e.timestamp else "Unknown")
-            )
-            lines.append(f"[{ts_str}] [{e.role.upper()}]\n{e.content}\n")
-        return "\n".join(lines)
-
-
-# Context monitoring helper functions
-def calculate_context_usage(
-    context: str, model: str = "llama-3.3-70b-versatile"
-) -> Dict[str, Any]:
-    tokens = len(context) // 4
-    max_tokens = MODEL_TOKEN_LIMITS.get(model, 128000)
-    percent = round((tokens / max_tokens) * 100, 1)
-    return {"tokens": tokens, "max": max_tokens, "percent": percent}
-
-
-def monitor_context_window(
-    context: str, model: str = "llama-3.3-70b-versatile"
-) -> Dict[str, Any]:
-    res = calculate_context_usage(context, model)
-    percent = float(res["percent"])
-    res["status"] = (
-        "ok" if percent < 50 else ("warning" if percent < 80 else "critical")
-    )
-    return res
-
 
 async def summarise_context_window(
     content: str,
@@ -499,7 +461,7 @@ async def summarise_context_window(
     prompt = f"Summarize key decisions, technical details, and actions from this conversation:\n{cleaned[:6000]}"
     res = await active_llm.ainvoke(prompt)
     raw_content = res.content if hasattr(res, "content") else res
-    summary_text = _extract_text_content(raw_content)
+    summary_text = extract_text_content(raw_content)
 
     summary_id = str(uuid.uuid4())
     desc = f"Context summary for thread {thread_id or 'general'}"
@@ -514,7 +476,7 @@ async def summarize_conversation(
     memory_service: MemoryService,
     llm_instance: Optional[BaseLanguageModel] = None,
 ) -> Dict[str, str]:
-    rows = await memory_service.memory_repository.get_unsummarized_messages(thread_id)
+    rows = await memory_service._memory_repository.get_unsummarized_messages(thread_id)
     if not rows:
         return {"status": "nothing_to_summarize"}
 
