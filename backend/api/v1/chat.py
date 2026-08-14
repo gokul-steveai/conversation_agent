@@ -6,7 +6,9 @@ from schemas.auth import UserResponse
 from schemas.schemas import ChatMessageRequest, ChatMessageResponse, ToolLogItem
 from schemas.session import SaveSessionRequest
 from services.session_service import SessionService
-from utils import format_sse_event, logger, resolve_chat_context
+from utils.chat_utils import format_sse_event, resolve_chat_context
+from utils.logger import logger
+
 
 router = APIRouter(prefix="/chat", tags=["Chat & Agents"])
 

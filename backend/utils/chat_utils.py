@@ -2,7 +2,6 @@ import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
-from core.llm_factory import ainvoke_structured, llm
 from langchain_core.messages import BaseMessage, SystemMessage
 from prompts import SYSTEM_PROMPT_SEARCH_EVALUATION
 from schemas.auth import UserResponse
@@ -23,13 +22,19 @@ def extract_state_str(state: Dict[str, Any], keys: List[str], default: str = "")
     return default
 
 
-def merge_state_topics(state: Dict[str, Any], new_topics: List[str]) -> None:
-    """Deduplicates and merges new topic strings into state['topic_preferences']."""
+def merge_state_topics(state: Dict[str, Any], new_topics: List[Any]) -> None:
+    """Deduplicates, normalizes, and merges topic strings into state['topic_preferences']."""
     if not new_topics:
         return
     existing_raw = state.get("topic_preferences", [])
-    existing: List[str] = existing_raw if isinstance(existing_raw, list) else []
-    cleaned_new = [t.strip() for t in new_topics if isinstance(t, str) and t.strip()]
+    existing: List[str] = (
+        [str(t).strip() for t in existing_raw if t is not None and str(t).strip()]
+        if isinstance(existing_raw, list)
+        else []
+    )
+    cleaned_new = [
+        str(t).strip() for t in new_topics if t is not None and str(t).strip()
+    ]
     if cleaned_new:
         state["topic_preferences"] = list(dict.fromkeys(existing + cleaned_new))
 
@@ -81,7 +86,10 @@ def prepare_user_context(state: Dict[str, Any]) -> Tuple[str, str, str, str, str
     user_location = extract_state_str(state, ["location"], default="Not specified")
 
     user_topics_val = state.get("topic_preferences") or []
-    user_topics = user_topics_val if isinstance(user_topics_val, list) else []
+    raw_topics = user_topics_val if isinstance(user_topics_val, list) else []
+    user_topics = [
+        str(t).strip() for t in raw_topics if t is not None and str(t).strip()
+    ]
     formatted_topics = ", ".join(user_topics) if user_topics else "General"
     formatted_current_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -130,9 +138,10 @@ async def update_user_context_from_history(
     state: Dict[str, Any],
 ) -> None:
     try:
-        refined: StateUpdate = await ainvoke_structured(
-            llm, StateUpdate, history_messages
-        )
+        bounded = bound_history(history_messages, max_recent=6)
+        from core.llm_factory import ainvoke_structured, llm
+
+        refined: StateUpdate = await ainvoke_structured(llm, StateUpdate, bounded)
         if refined.name and refined.name.strip():
             state["name"] = refined.name.strip()
         if refined.location and refined.location.strip():
@@ -150,6 +159,8 @@ async def evaluate_search_prompt(
     user_text: str,
     history_messages: List[BaseMessage],
 ) -> ChatDecision:
+    from core.llm_factory import ainvoke_structured, llm
+
     bounded = bound_history(history_messages, max_recent=6)
     system_msg = SystemMessage(
         SYSTEM_PROMPT_SEARCH_EVALUATION.format(

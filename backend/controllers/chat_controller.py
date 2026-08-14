@@ -9,16 +9,16 @@ from prompts import (
     SYSTEM_PROMPT_WEB_SYNTHESIS,
 )
 from services import MemoryService, SearchService
-from utils import (
+from utils.chat_utils import (
     bound_history,
     evaluate_search_prompt,
-    logger,
     merge_state_topics,
     prepare_user_context,
     refine_search_query,
-    sanitize_response,
     update_user_context_from_history,
 )
+from utils.logger import logger
+from utils.sanitizer import StreamSanitizer, sanitize_response
 
 from langfuse import observe
 
@@ -167,6 +167,42 @@ class ChatController:
         )
         return assistant_reply, []
 
+    async def _stream_and_record_reply(
+        self,
+        messages: List[BaseMessage],
+        history_messages: List[BaseMessage],
+        session_id: str = "",
+    ) -> AsyncGenerator[str, None]:
+        full_reply_parts = []
+        sanitizer = StreamSanitizer(window_size=150)
+
+        async for chunk in llm.astream(
+            messages, config={"callbacks": [langfuse_handler]}
+        ):
+            raw_chunk = chunk.content if hasattr(chunk, "content") else str(chunk)
+            if isinstance(raw_chunk, list):
+                raw_chunk = " ".join(
+                    item.get("text", "") if isinstance(item, dict) else str(item)
+                    for item in raw_chunk
+                )
+            if not raw_chunk:
+                continue
+
+            full_reply_parts.append(raw_chunk)
+
+            emitted = sanitizer.process_chunk(raw_chunk)
+            if emitted:
+                yield emitted
+
+        final_flush = sanitizer.flush()
+        if final_flush:
+            yield final_flush
+
+        full_raw_reply = "".join(full_reply_parts)
+        assistant_reply = sanitize_response(full_raw_reply)
+        history_messages.append(AIMessage(assistant_reply))
+        await self._save_message_memory(session_id, assistant_reply, role="assistant")
+
     @observe(name="chat_controller_process_step")
     async def process_step(
         self,
@@ -233,54 +269,6 @@ class ChatController:
             history_messages,
             session_id=session_id,
         )
-
-    async def _stream_and_record_reply(
-        self,
-        messages: List[BaseMessage],
-        history_messages: List[BaseMessage],
-        session_id: str = "",
-    ) -> AsyncGenerator[str, None]:
-        full_reply_parts = []
-        buffered_prefix = ""
-        prefix_flushed = False
-        MAX_PREFIX_BUFFER_LEN = 120
-
-        async for chunk in llm.astream(
-            messages, config={"callbacks": [langfuse_handler]}
-        ):
-            raw_chunk = chunk.content if hasattr(chunk, "content") else str(chunk)
-            if isinstance(raw_chunk, list):
-                raw_chunk = " ".join(
-                    item.get("text", "") if isinstance(item, dict) else item
-                    for item in raw_chunk
-                )
-            if not raw_chunk:
-                continue
-
-            full_reply_parts.append(raw_chunk)
-
-            if not prefix_flushed:
-                buffered_prefix += raw_chunk
-                if (
-                    len(buffered_prefix) >= MAX_PREFIX_BUFFER_LEN
-                    or "\n" in buffered_prefix
-                ):
-                    sanitized_prefix = sanitize_response(buffered_prefix)
-                    prefix_flushed = True
-                    if sanitized_prefix:
-                        yield sanitized_prefix
-            else:
-                yield raw_chunk
-
-        if not prefix_flushed and buffered_prefix:
-            sanitized_prefix = sanitize_response(buffered_prefix)
-            if sanitized_prefix:
-                yield sanitized_prefix
-
-        full_raw_reply = "".join(full_reply_parts)
-        assistant_reply = sanitize_response(full_raw_reply)
-        history_messages.append(AIMessage(assistant_reply))
-        await self._save_message_memory(session_id, assistant_reply, role="assistant")
 
     @observe(name="chat_controller_process_step_stream")
     async def process_step_stream(

@@ -44,6 +44,34 @@ def sanitize_response(text: Union[str, List[Any]]) -> str:
     return cleaned if cleaned else str_text.strip()
 
 
+class StreamSanitizer:
+    """Stateful streaming sanitizer enforcing guardrails across all emitted SSE response chunks."""
+
+    def __init__(self, window_size: int = 150) -> None:
+        self.window_size = window_size
+        self._buffer = ""
+
+    def process_chunk(self, chunk: str) -> str:
+        if not chunk:
+            return ""
+        self._buffer += chunk
+
+        if len(self._buffer) > self.window_size:
+            emit_len = len(self._buffer) - self.window_size
+            to_emit = self._buffer[:emit_len]
+            self._buffer = self._buffer[emit_len:]
+            return sanitize_response(to_emit)
+
+        return ""
+
+    def flush(self) -> str:
+        if not self._buffer:
+            return ""
+        remaining = sanitize_response(self._buffer)
+        self._buffer = ""
+        return remaining
+
+
 def format_validation_error(e: ValidationError) -> str:
     """Formats raw Pydantic ValidationError instances into clean, user-friendly bullet points."""
     messages = []
