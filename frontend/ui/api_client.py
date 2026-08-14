@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import streamlit as st
@@ -43,51 +43,49 @@ class APIClient:
         return headers
 
     @classmethod
+    def _request(
+        cls,
+        method: str,
+        endpoint: str,
+        json_data: Optional[Dict[str, Any]] = None,
+        timeout: int = 10,
+    ) -> requests.Response:
+        url = f"{BASE_API_URL}{endpoint}"
+        return cls.get_session().request(
+            method=method,
+            url=url,
+            json=json_data,
+            headers=cls._get_headers(),
+            timeout=timeout,
+        )
+
+    @classmethod
     def register(cls, name: str, email: str, password: str) -> Dict[str, Any]:
-        url = f"{BASE_API_URL}/auth/register"
-        payload = {"name": name, "email": email, "password": password}
         try:
-            http_response = cls.get_session().post(
-                url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=10,
+            res = cls._request(
+                "POST",
+                "/auth/register",
+                {"name": name, "email": email, "password": password},
             )
-            return http_response.json()
-        except Exception as exception_detail:
-            return {
-                "success": False,
-                "error": f"Backend connection failed: {str(exception_detail)}",
-            }
+            return res.json()
+        except Exception as e:
+            return {"success": False, "error": f"Backend connection failed: {e}"}
 
     @classmethod
     def login(cls, email: str, password: str) -> Dict[str, Any]:
-        url = f"{BASE_API_URL}/auth/login"
-        payload = {"email": email, "password": password}
         try:
-            http_response = cls.get_session().post(
-                url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=10,
+            res = cls._request(
+                "POST", "/auth/login", {"email": email, "password": password}
             )
-            return http_response.json()
-        except Exception as exception_detail:
-            return {
-                "success": False,
-                "error": f"Backend connection failed: {str(exception_detail)}",
-            }
+            return res.json()
+        except Exception as e:
+            return {"success": False, "error": f"Backend connection failed: {e}"}
 
     @classmethod
     def list_sessions(cls, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        url = f"{BASE_API_URL}/sessions"
         try:
-            http_response = cls.get_session().get(
-                url, headers=cls._get_headers(), timeout=10
-            )
-            if http_response.status_code == 200:
-                return http_response.json()
-            return []
+            res = cls._request("GET", "/sessions")
+            return res.json() if res.status_code == 200 else []
         except Exception:
             return []
 
@@ -95,17 +93,12 @@ class APIClient:
     def create_session(
         cls, user_id: Optional[str] = None, title: str = "New Chat Session"
     ) -> Optional[Dict[str, Any]]:
-        url = f"{BASE_API_URL}/sessions"
         payload = {"title": title}
         if user_id:
             payload["user_id"] = user_id
         try:
-            http_response = cls.get_session().post(
-                url, json=payload, headers=cls._get_headers(), timeout=10
-            )
-            if http_response.status_code == 200:
-                return http_response.json()
-            return None
+            res = cls._request("POST", "/sessions", payload)
+            return res.json() if res.status_code == 200 else None
         except Exception:
             return None
 
@@ -113,25 +106,17 @@ class APIClient:
     def load_session(
         cls, session_id: str, user_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        url = f"{BASE_API_URL}/sessions/{session_id}"
         try:
-            http_response = cls.get_session().get(
-                url, headers=cls._get_headers(), timeout=10
-            )
-            if http_response.status_code == 200:
-                return http_response.json()
-            return None
+            res = cls._request("GET", f"/sessions/{session_id}")
+            return res.json() if res.status_code == 200 else None
         except Exception:
             return None
 
     @classmethod
     def delete_session(cls, session_id: str, user_id: Optional[str] = None) -> bool:
-        url = f"{BASE_API_URL}/sessions/{session_id}"
         try:
-            http_response = cls.get_session().delete(
-                url, headers=cls._get_headers(), timeout=10
-            )
-            return http_response.status_code == 200
+            res = cls._request("DELETE", f"/sessions/{session_id}")
+            return res.status_code == 200
         except Exception:
             return False
 
@@ -139,79 +124,76 @@ class APIClient:
     def send_chat_message(
         cls, user_text: str, session_id: str, state: Dict[str, Any]
     ) -> Dict[str, Any]:
-        url = f"{BASE_API_URL}/chat/message"
-        payload = {
-            "user_text": user_text,
-            "session_id": session_id,
-            "state": state,
-        }
+        payload = {"user_text": user_text, "session_id": session_id, "state": state}
         try:
-            http_response = cls.get_session().post(
-                url, json=payload, headers=cls._get_headers(), timeout=60
-            )
-            if http_response.status_code == 200:
-                return http_response.json()
+            res = cls._request("POST", "/chat/message", payload, timeout=60)
+            if res.status_code == 200:
+                return res.json()
             return {
-                "reply": f"Backend Error: HTTP {http_response.status_code} - {http_response.text}",
+                "reply": f"Backend Error: HTTP {res.status_code} - {res.text}",
                 "tool_logs": [],
                 "updated_state": state,
             }
-        except Exception as exception_detail:
+        except Exception as e:
             return {
-                "reply": f"Unable to reach FastAPI backend: {str(exception_detail)}.",
+                "reply": f"Unable to reach FastAPI backend: {e}.",
                 "tool_logs": [],
                 "updated_state": state,
             }
+
+    @classmethod
+    def _parse_sse_line(
+        cls, line: str, active_event: str
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        if isinstance(line, bytes):
+            line = line.decode("utf-8")
+
+        if line.startswith("event: "):
+            return None, line[7:].strip()
+
+        if line.startswith("data: "):
+            raw = line[6:]
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = {"chunk": raw, "content": raw}
+            return {"event": active_event, "data": data}, active_event
+
+        return None, active_event
 
     @classmethod
     def stream_chat_message(
         cls, user_text: str, session_id: str, state: Dict[str, Any]
     ):
         url = f"{BASE_API_URL}/chat/stream"
-        payload = {
-            "user_text": user_text,
-            "session_id": session_id,
-            "state": state,
-        }
+        payload = {"user_text": user_text, "session_id": session_id, "state": state}
         try:
             with cls.get_session().post(
                 url, json=payload, headers=cls._get_headers(), stream=True, timeout=60
             ) as http_response:
-                if http_response.status_code == 200:
-                    active_event_type = "message"
-                    for line in http_response.iter_lines(decode_unicode=True):
-                        if line:
-                            if isinstance(line, bytes):
-                                line = line.decode("utf-8")
-                            if line.startswith("event: "):
-                                active_event_type = line[7:].strip()
-                            elif line.startswith("data: "):
-                                raw_data = line[6:]
-                                try:
-                                    parsed_data = json.loads(raw_data)
-                                    yield {
-                                        "event": active_event_type,
-                                        "data": parsed_data,
-                                    }
-                                except Exception:
-                                    yield {
-                                        "event": active_event_type,
-                                        "data": {
-                                            "chunk": raw_data,
-                                            "content": raw_data,
-                                        },
-                                    }
-                else:
+                if http_response.status_code != 200:
                     yield {
                         "event": "error",
                         "data": {
                             "error": f"Backend Error HTTP {http_response.status_code}"
                         },
                     }
-        except Exception as exception_detail:
+                    return
+
+                active_event = "message"
+                for line in http_response.iter_lines(decode_unicode=True):
+                    if line:
+                        str_line = (
+                            line.decode("utf-8") if isinstance(line, bytes) else line
+                        )
+                        evt_obj, active_event = cls._parse_sse_line(
+                            str_line, active_event
+                        )
+                        if evt_obj:
+                            yield evt_obj
+
+        except Exception as e:
             yield {
                 "event": "error",
-                "data": {
-                    "error": f"Unable to reach FastAPI backend: {str(exception_detail)}"
-                },
+                "data": {"error": f"Unable to reach FastAPI backend: {e}"},
             }

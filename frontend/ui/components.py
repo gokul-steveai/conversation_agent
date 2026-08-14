@@ -132,18 +132,24 @@ class UIComponents:
             if current_id not in option_ids and option_ids:
                 current_id = option_ids[0]
                 st.session_state.current_session_id = current_id
+                st.session_state.session_selector_widget = current_id
+
+            if st.session_state.get("session_selector_widget") != current_id:
+                st.session_state.session_selector_widget = current_id
 
             curr_idx = option_ids.index(current_id) if current_id in option_ids else 0
 
             def handle_session_change():
                 selected_id = st.session_state.get("session_selector_widget")
-                if selected_id:
+                if selected_id and selected_id != st.session_state.get(
+                    "current_session_id"
+                ):
                     SessionManager.switch_session(selected_id)
 
             st.selectbox(
                 "Select Conversation Session:",
                 options=option_ids,
-                format_func=lambda sid: session_options[sid],
+                format_func=lambda sid: str(session_options.get(sid) or sid),
                 index=curr_idx,
                 key="session_selector_widget",
                 on_change=handle_session_change,

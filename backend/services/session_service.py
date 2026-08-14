@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from config.constants import (
@@ -21,7 +22,7 @@ from schemas import (
     SessionDetailResponse,
     SessionResponse,
 )
-from utils import logger
+from utils import logger, sanitize_response
 
 
 class SessionService:
@@ -62,14 +63,107 @@ class SessionService:
             return []
 
     @classmethod
-    def format_title(cls, state: Dict[str, Any], session_id: str) -> str:
-        name = state.get("name")
-        loc = state.get("location")
-        if name and loc:
-            return f"{name} from {loc}"
-        elif name:
-            return f"Session - {name}"
-        return f"Session {session_id[:8]}"
+    def _fallback_heuristic_title(
+        cls, first_user_text: str, existing_title: str = ""
+    ) -> str:
+        import re
+
+        cleaned = re.sub(
+            r"^(do you know about|tell me about|what is|what are|can you explain|how do i|please|how to|i want to know about|could you explain|what do you know about)\s+",
+            "",
+            first_user_text,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        if not cleaned:
+            cleaned = first_user_text
+
+        cleaned = cleaned.rstrip("?.! ")
+        words = cleaned.split()
+        if len(words) > 5:
+            short_title = " ".join(words[:5]) + "..."
+        else:
+            short_title = " ".join(words)
+
+        if short_title:
+            short_title = short_title[0].upper() + short_title[1:]
+        else:
+            short_title = "Chat Session"
+
+        return short_title[:45]
+
+    @classmethod
+    async def generate_llm_title(
+        cls, messages: List[Dict[str, Any]], existing_title: str = ""
+    ) -> str:
+        if existing_title and existing_title not in ["New Chat Session", ""]:
+            if (
+                not existing_title.startswith("Session -")
+                and "from" not in existing_title
+                and not existing_title.startswith("Session ")
+            ):
+                return existing_title
+
+        first_user_text = ""
+        for msg in messages:
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                raw_user_content = msg.get("content")
+                content = (
+                    sanitize_response(raw_user_content).strip()
+                    if raw_user_content
+                    else ""
+                )
+                if content:
+                    first_user_text = content
+                    break
+
+        if not first_user_text:
+            return existing_title or "New Chat Session"
+
+        try:
+            from core.llm_factory import llm
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            prompt = (
+                "You are an expert concise title generator.\n"
+                "Generate a short, punchy, professional title (3 to 5 words max) summarizing the topic of the following user query.\n"
+                "Rules:\n"
+                "1. Output ONLY the plain title text with NO quotes, NO markdown, NO prefixes (like 'Title:'), and NO ending punctuation.\n"
+                "2. Keep it strictly between 2 and 5 words."
+            )
+            res = await llm.ainvoke(
+                [SystemMessage(content=prompt), HumanMessage(content=first_user_text)]
+            )
+            raw_title = (
+                sanitize_response(res.content)
+                if res and res.content is not None
+                else ""
+            )
+            title = raw_title.strip().replace('"', "").replace("'", "")
+            title = title.lstrip("#*` ").rstrip(".!?")
+            if title and len(title) >= 3:
+                return title[:45]
+        except Exception as e:
+            logger.warning(f"LLM title generation failed, using heuristic: {e}")
+
+        return cls._fallback_heuristic_title(first_user_text, existing_title)
+
+    @classmethod
+    def format_title(
+        cls, messages: List[Dict[str, Any]], existing_title: str = ""
+    ) -> str:
+        user_content = next(
+            (
+                sanitize_response(m.get("content") or "")
+                for m in messages
+                if isinstance(m, dict) and m.get("role") == "user" and m.get("content")
+            ),
+            "",
+        )
+        return cls._fallback_heuristic_title(
+            user_content,
+            existing_title=existing_title,
+        )
 
     @classmethod
     async def create_session(
@@ -90,6 +184,7 @@ class SessionService:
         await UserRepository.get_or_create_user(user_id=user_id)
 
         session_id = str(uuid.uuid4())
+        current_time_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
         initial_state = {
             "user_id": user_id,
@@ -105,7 +200,7 @@ class SessionService:
                     name="User",
                     location="Not specified",
                     topics="General",
-                    current_time="",
+                    current_time=current_time_str,
                 )
             ),
             AIMessage(DEFAULT_GREETING),
@@ -134,7 +229,14 @@ class SessionService:
         if not request.user_id:
             raise ValueError("user_id must be provided to save a session.")
 
-        title = cls.format_title(request.state, request.session_id)
+        existing = await SessionRepository.find_by_session_and_user_id(
+            request.session_id, request.user_id
+        )
+        existing_title = existing.title if existing else ""
+
+        title = await cls.generate_llm_title(
+            request.messages, existing_title=existing_title
+        )
         state_json = json.dumps(request.state)
         messages_json = json.dumps(request.messages)
         history_json = cls.serialize_messages(request.history_messages)
