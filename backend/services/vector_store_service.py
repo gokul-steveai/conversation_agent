@@ -9,6 +9,7 @@ from typing import (
     Mapping,
     Optional,
     Type,
+    Union,
 )
 
 import numpy as np
@@ -40,17 +41,39 @@ class VectorStoreService:
     async def add_texts(
         self,
         texts: List[str],
-        metadatas: Optional[List[Dict[str, Any]]] = None,
+        metadatas: Optional[Union[Dict[str, Any], List[Dict[str, Any]]]] = None,
     ) -> List[str]:
         if not self.embedding_function:
             raise ValueError("Embedding function is required to add texts.")
+
+        if not texts:
+            return []
+
+        active_version = getattr(self.embedding_function, "version", "default")
+
+        if metadatas is None:
+            formatted_metadatas: List[Dict[str, Any]] = [{} for _ in texts]
+        elif isinstance(metadatas, dict):
+            formatted_metadatas = [dict(metadatas) for _ in texts]
+        elif isinstance(metadatas, list):
+            if len(metadatas) == 1:
+                formatted_metadatas = [dict(metadatas[0]) for _ in texts]
+            elif len(metadatas) == len(texts):
+                formatted_metadatas = metadatas
+            else:
+                raise ValueError(
+                    f"Length mismatch: {len(texts)} texts provided, but metadatas list has length {len(metadatas)}."
+                )
+        else:
+            formatted_metadatas = [{} for _ in texts]
 
         embeddings = self.embedding_function.embed_documents(texts)
         records: List[BaseVectorModel] = []
 
         for index, text_content in enumerate(texts):
             doc_id = str(uuid.uuid4())
-            metadata = metadatas[index] if metadatas and index < len(metadatas) else {}
+            metadata = dict(formatted_metadatas[index])
+            metadata["_embedding_version"] = active_version
             embedding_json = json.dumps(embeddings[index])
 
             record = self.model_cls(
@@ -72,12 +95,16 @@ class VectorStoreService:
         if not self.embedding_function:
             raise ValueError("Embedding function is required for similarity search.")
 
+        active_version = getattr(self.embedding_function, "version", "default")
         query_embedding = np.array(
             self.embedding_function.embed_query(query), dtype=np.float32
         )
         query_norm = np.linalg.norm(query_embedding)
 
-        instances = await self.vector_repository.get_all_vector_records(self.model_cls)
+        candidate_limit = max(100, k * 10)
+        instances = await self.vector_repository.get_candidate_vector_records(
+            self.model_cls, limit=candidate_limit
+        )
 
         scored_documents: List[tuple[Document, float]] = []
         for instance in instances:
@@ -85,6 +112,11 @@ class VectorStoreService:
                 metadata = json.loads(instance.metadata_json or "{}")
             except Exception:
                 metadata = {}
+
+            # Skip vector records from incompatible embedding spaces/versions
+            stored_version = metadata.get("_embedding_version")
+            if stored_version and stored_version != active_version:
+                continue
 
             if filter:
                 matches_filter = True

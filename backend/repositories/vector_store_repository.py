@@ -31,3 +31,11 @@ class VectorStoreRepository:
             stmt = select(model_cls)
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
+    async def get_candidate_vector_records(
+        self, model_cls: Type[BaseVectorModel], limit: int = 100
+    ) -> List[BaseVectorModel]:
+        async with self.session_factory() as session:
+            stmt = select(model_cls).order_by(model_cls.created_at.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())

@@ -1,3 +1,4 @@
+import hashlib
 from typing import List, Optional
 
 from langchain_core.embeddings import Embeddings
@@ -7,6 +8,14 @@ class OpenSourceEmbeddingService(Embeddings):
     def __init__(self, dimension: int = 384) -> None:
         self.dimension = dimension
 
+    @property
+    def version(self) -> str:
+        return "opensource_blake2b_v1"
+
+    def _token_hash(self, token: str) -> int:
+        digest = hashlib.blake2b(token.encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], byteorder="big", signed=False)
+
     def _hash_vector(self, text: str) -> List[float]:
         tokens = text.lower().split()
         vector = [0.0] * self.dimension
@@ -14,11 +23,11 @@ class OpenSourceEmbeddingService(Embeddings):
             return vector
 
         for i, token in enumerate(tokens):
-            index = hash(token) % self.dimension
+            index = self._token_hash(token) % self.dimension
             vector[index] += 1.0
             if i < len(tokens) - 1:
                 bigram = f"{token}_{tokens[i + 1]}"
-                bigram_index = hash(bigram) % self.dimension
+                bigram_index = self._token_hash(bigram) % self.dimension
                 vector[bigram_index] += 0.5
 
         sum_of_squares = sum(val * val for val in vector)
@@ -78,6 +87,12 @@ class HuggingFaceEmbeddingService(Embeddings):
         self._fallback_service = HuggingFaceEmbeddingService._shared_fallback
         self._huggingface_embeddings = HuggingFaceEmbeddingService._shared_embeddings
 
+    @property
+    def version(self) -> str:
+        if self._huggingface_embeddings is not None:
+            return f"hf_{self.model_name}"
+        return getattr(self._fallback_service, "version", "opensource_blake2b_v1")
+
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         if self._huggingface_embeddings is not None:
             try:
@@ -93,8 +108,3 @@ class HuggingFaceEmbeddingService(Embeddings):
             except Exception:
                 pass
         return self._fallback_service.embed_query(text)
-
-
-# Backwards compatibility aliases
-OpenSourceEmbeddings = OpenSourceEmbeddingService
-HuggingFaceEmbeddingModel = HuggingFaceEmbeddingService

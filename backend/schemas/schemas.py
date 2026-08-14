@@ -14,7 +14,7 @@ class StateUpdate(BaseModel):
     )
     topics: Optional[List[str]] = Field(
         default_factory=list,
-        description="All topics/interests identified or confirmed in conversation",
+        description="List of topics/interests identified in conversation. Must be a JSON array of strings (e.g. ['AI', 'tech']), or [] if none.",
     )
 
     @field_validator("topics", mode="before")
@@ -22,7 +22,11 @@ class StateUpdate(BaseModel):
     def _coerce_null_topics(cls, v: Any) -> List[str]:
         if v is None:
             return []
-        return v
+        if isinstance(v, str):
+            return [t.strip() for t in v.split(",") if t.strip()]
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if str(item).strip()]
+        return []
 
 
 class ChatDecision(BaseModel):
@@ -53,7 +57,8 @@ class ChatDecision(BaseModel):
         description="User home/current location explicitly declared by user (e.g., 'I live in Paris', 'My location is London')",
     )
     extracted_topics: Optional[List[str]] = Field(
-        default_factory=list, description="Topics/interests mentioned in prompt if any"
+        default_factory=list,
+        description="List of topics/interests mentioned in prompt if any. Must be a JSON array of strings (e.g. ['AI', 'tech']), or [] if none.",
     )
 
     @field_validator("extracted_topics", mode="before")
@@ -61,7 +66,11 @@ class ChatDecision(BaseModel):
     def _coerce_null_extracted_topics(cls, v: Any) -> List[str]:
         if v is None:
             return []
-        return v
+        if isinstance(v, str):
+            return [t.strip() for t in v.split(",") if t.strip()]
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if str(item).strip()]
+        return []
 
     @field_validator("needs_clarification", "needs_web_search", mode="before")
     @classmethod

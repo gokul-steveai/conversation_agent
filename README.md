@@ -180,7 +180,9 @@ GROQ_API_KEY=gsk_your_groq_api_key
 GROQ_MODEL=llama-3.3-70b-versatile
 TAVILY_API_KEY=tvly-your_tavily_api_key
 DATABASE_URL=sqlite:///data/conversations.db
-JWT_SECRET_KEY=your-jwt-secret-key
+
+# Generate JWT key via: openssl rand -hex 32
+JWT_SECRET_KEY=75a1449b21a3287f50c8462eba0e38fa6ec9122c3c58d53025e91d66dfeff50b
 BASE_API_URL=http://localhost:8000/api/v1
 ```
 

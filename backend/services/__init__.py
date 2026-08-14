@@ -1,8 +1,6 @@
 from .auth_service import AuthService
 from .embedding_service import (
-    HuggingFaceEmbeddingModel,
     HuggingFaceEmbeddingService,
-    OpenSourceEmbeddings,
     OpenSourceEmbeddingService,
 )
 from .memory_service import MemoryService
@@ -18,6 +16,4 @@ __all__ = [
     "VectorStoreService",
     "OpenSourceEmbeddingService",
     "HuggingFaceEmbeddingService",
-    "OpenSourceEmbeddings",
-    "HuggingFaceEmbeddingModel",
 ]

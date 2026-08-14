@@ -19,10 +19,14 @@ from langfuse import observe
 
 
 class ChatController:
+    _memory_service: Optional[MemoryService] = None
+
     @classmethod
     def _get_memory_service(cls) -> Optional[MemoryService]:
         if DatabaseManager._SessionLocal:
-            return MemoryService(get_db)
+            if cls._memory_service is None:
+                cls._memory_service = MemoryService(get_db)
+            return cls._memory_service
         return None
 
     @classmethod
@@ -47,6 +51,8 @@ class ChatController:
         tool_name: str,
         tool_args: Any,
         result: str,
+        status: str = "success",
+        error_message: Optional[str] = None,
     ) -> None:
         if not session_id:
             return
@@ -58,7 +64,8 @@ class ChatController:
                     tool_name=tool_name,
                     tool_args=tool_args,
                     result=result,
-                    status="success",
+                    status=status,
+                    error_message=error_message,
                 )
         except Exception:
             pass
@@ -103,7 +110,7 @@ class ChatController:
             pass
 
     @classmethod
-    @observe(name="evaluate_search_decision", as_type="chain")
+    @observe(name="evaluate_search_decision", as_type="chain", capture_input=False)
     async def _evaluate_prompt(
         cls,
         user_name: str,
@@ -169,7 +176,7 @@ class ChatController:
         return assistant_reply
 
     @classmethod
-    @observe(name="execute_search_flow", as_type="chain")
+    @observe(name="execute_search_flow", as_type="chain", capture_input=False)
     async def _execute_search_flow(
         cls,
         search_query: str,
@@ -186,10 +193,32 @@ class ChatController:
                 "content": f"🔍 [Tavily Search] Autonomously searching live web data: '{search_query}'...",
             }
         ]
-        retrieved_web_data = await SearchService.asearch_general(search_query)
-        await cls._save_tool_log(
-            session_id, "tavily_search", {"query": search_query}, retrieved_web_data
-        )
+        try:
+            retrieved_web_data = await SearchService.asearch_general(search_query)
+            await cls._save_tool_log(
+                session_id,
+                "tavily_search",
+                {"query": search_query},
+                retrieved_web_data,
+                status="success",
+            )
+        except Exception as e:
+            err_msg = str(e)
+            retrieved_web_data = f"[Web search failed: {err_msg}]"
+            await cls._save_tool_log(
+                session_id,
+                "tavily_search",
+                {"query": search_query},
+                result="",
+                status="error",
+                error_message=err_msg,
+            )
+            tool_logs.append(
+                {
+                    "role": "tool",
+                    "content": f"⚠️ [Tavily Search Failed] {err_msg}",
+                }
+            )
 
         system_message = SystemMessage(
             SYSTEM_PROMPT_WEB_SYNTHESIS.format(
@@ -354,18 +383,41 @@ class ChatController:
         session_id: str = "",
     ) -> AsyncGenerator[str, None]:
         full_reply_parts = []
+        buffered_prefix = ""
+        prefix_flushed = False
+        MAX_PREFIX_BUFFER_LEN = 120
+
         async for chunk in llm.astream(
             messages, config={"callbacks": [langfuse_handler]}
         ):
             raw_chunk = chunk.content if hasattr(chunk, "content") else str(chunk)
             if isinstance(raw_chunk, list):
                 raw_chunk = " ".join(
-                    item.get("text", "") if isinstance(item, dict) else item
+                    item.get("text", "") if isinstance(item, dict) else str(item)
                     for item in raw_chunk
                 )
-            if raw_chunk:
-                full_reply_parts.append(raw_chunk)
+            if not raw_chunk:
+                continue
+
+            full_reply_parts.append(raw_chunk)
+
+            if not prefix_flushed:
+                buffered_prefix += raw_chunk
+                if (
+                    len(buffered_prefix) >= MAX_PREFIX_BUFFER_LEN
+                    or "\n" in buffered_prefix
+                ):
+                    sanitized_prefix = sanitize_response(buffered_prefix)
+                    prefix_flushed = True
+                    if sanitized_prefix:
+                        yield sanitized_prefix
+            else:
                 yield raw_chunk
+
+        if not prefix_flushed and buffered_prefix:
+            sanitized_prefix = sanitize_response(buffered_prefix)
+            if sanitized_prefix:
+                yield sanitized_prefix
 
         full_raw_reply = "".join(full_reply_parts)
         assistant_reply = sanitize_response(full_raw_reply)
@@ -437,10 +489,27 @@ class ChatController:
             tool_msg = f"🔍 [Tavily Search] Autonomously searching live web data: '{search_query}'..."
             yield {"type": "tool", "content": tool_msg}
 
-            retrieved_web_data = await SearchService.asearch_general(search_query)
-            await cls._save_tool_log(
-                session_id, "tavily_search", {"query": search_query}, retrieved_web_data
-            )
+            try:
+                retrieved_web_data = await SearchService.asearch_general(search_query)
+                await cls._save_tool_log(
+                    session_id,
+                    "tavily_search",
+                    {"query": search_query},
+                    retrieved_web_data,
+                    status="success",
+                )
+            except Exception as e:
+                err_msg = str(e)
+                retrieved_web_data = f"[Web search failed: {err_msg}]"
+                await cls._save_tool_log(
+                    session_id,
+                    "tavily_search",
+                    {"query": search_query},
+                    result="",
+                    status="error",
+                    error_message=err_msg,
+                )
+                yield {"type": "tool", "content": f"⚠️ [Tavily Search Failed] {err_msg}"}
 
             system_message = SystemMessage(
                 SYSTEM_PROMPT_WEB_SYNTHESIS.format(

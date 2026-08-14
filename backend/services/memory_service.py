@@ -34,6 +34,7 @@ from services.embedding_service import HuggingFaceEmbeddingService
 from services.session_service import SessionService
 from services.vector_store_service import VectorStoreService
 from sqlalchemy.ext.asyncio import AsyncSession
+from utils.logger import logger
 
 
 def _extract_text_content(content: Any) -> str:
@@ -54,6 +55,8 @@ MODEL_TOKEN_LIMITS = {"llama-3.3-70b-versatile": 128000}
 
 
 class MemoryService:
+    _shared_embedding_service: Optional[HuggingFaceEmbeddingService] = None
+
     def __init__(
         self,
         session_factory: Optional[
@@ -65,33 +68,66 @@ class MemoryService:
         self.memory_repository = memory_repository or MemoryRepository(
             self.session_factory
         )
-        self._embedding_function = HuggingFaceEmbeddingService()
 
-        self.knowledge_base_vs = VectorStoreService(
-            session_factory=self.session_factory,
-            model_cls=AgentKnowledgeBaseVectorModel,
-            embedding_function=self._embedding_function,
-        )
-        self.workflow_vs = VectorStoreService(
-            session_factory=self.session_factory,
-            model_cls=AgentWorkflowPatternModel,
-            embedding_function=self._embedding_function,
-        )
-        self.toolbox_vs = VectorStoreService(
-            session_factory=self.session_factory,
-            model_cls=AgentToolboxDefinitionModel,
-            embedding_function=self._embedding_function,
-        )
-        self.entity_vs = VectorStoreService(
-            session_factory=self.session_factory,
-            model_cls=AgentEntitiesRegistryModel,
-            embedding_function=self._embedding_function,
-        )
-        self.summary_vs = VectorStoreService(
-            session_factory=self.session_factory,
-            model_cls=AgentContextSummaryModel,
-            embedding_function=self._embedding_function,
-        )
+        if MemoryService._shared_embedding_service is None:
+            MemoryService._shared_embedding_service = HuggingFaceEmbeddingService()
+        self._embedding_function = MemoryService._shared_embedding_service
+
+        self._knowledge_base_vs: Optional[VectorStoreService] = None
+        self._workflow_vs: Optional[VectorStoreService] = None
+        self._toolbox_vs: Optional[VectorStoreService] = None
+        self._entity_vs: Optional[VectorStoreService] = None
+        self._summary_vs: Optional[VectorStoreService] = None
+
+    @property
+    def knowledge_base_vs(self) -> VectorStoreService:
+        if self._knowledge_base_vs is None:
+            self._knowledge_base_vs = VectorStoreService(
+                session_factory=self.session_factory,
+                model_cls=AgentKnowledgeBaseVectorModel,
+                embedding_function=self._embedding_function,
+            )
+        return self._knowledge_base_vs
+
+    @property
+    def workflow_vs(self) -> VectorStoreService:
+        if self._workflow_vs is None:
+            self._workflow_vs = VectorStoreService(
+                session_factory=self.session_factory,
+                model_cls=AgentWorkflowPatternModel,
+                embedding_function=self._embedding_function,
+            )
+        return self._workflow_vs
+
+    @property
+    def toolbox_vs(self) -> VectorStoreService:
+        if self._toolbox_vs is None:
+            self._toolbox_vs = VectorStoreService(
+                session_factory=self.session_factory,
+                model_cls=AgentToolboxDefinitionModel,
+                embedding_function=self._embedding_function,
+            )
+        return self._toolbox_vs
+
+    @property
+    def entity_vs(self) -> VectorStoreService:
+        if self._entity_vs is None:
+            self._entity_vs = VectorStoreService(
+                session_factory=self.session_factory,
+                model_cls=AgentEntitiesRegistryModel,
+                embedding_function=self._embedding_function,
+            )
+        return self._entity_vs
+
+    @property
+    def summary_vs(self) -> VectorStoreService:
+        if self._summary_vs is None:
+            self._summary_vs = VectorStoreService(
+                session_factory=self.session_factory,
+                model_cls=AgentContextSummaryModel,
+                embedding_function=self._embedding_function,
+            )
+        return self._summary_vs
 
     # --- Session Operations ---
     @classmethod
@@ -138,13 +174,19 @@ class MemoryService:
         return await self.memory_repository.save_conversational_history(entry)
 
     async def read_conversational_memory(self, thread_id: str, limit: int = 10) -> str:
-        entries = await self.memory_repository.get_unsummarized_messages(thread_id)
-        messages = [f"[{e.role}] {e.content}" for e in entries[:limit]]
+        entries = await self.memory_repository.get_recent_unsummarized_messages(
+            thread_id, limit=limit
+        )
+        messages = [f"[{e.role}] {e.content}" for e in entries]
         messages_formatted = "\n".join(messages) or "(No unsummarized messages found.)"
         return f"## Conversation Memory\n{messages_formatted}"
 
-    async def mark_as_summarized(self, thread_id: str, summary_id: str) -> None:
-        await self.memory_repository.mark_messages_summarized(thread_id, summary_id)
+    async def mark_as_summarized(
+        self, thread_id: str, summary_id: str, message_ids: Optional[List[str]] = None
+    ) -> None:
+        await self.memory_repository.mark_messages_summarized(
+            thread_id, summary_id, message_ids=message_ids
+        )
 
     async def write_tool_log(
         self,
@@ -291,9 +333,23 @@ class MemoryService:
             content = _extract_text_content(raw_content)
             start, end = content.find("["), content.rfind("]")
             if start != -1 and end != -1:
-                return json.loads(content[start : end + 1])
-        except Exception:
-            pass
+                parsed = json.loads(content[start : end + 1])
+                if isinstance(parsed, list):
+                    validated_entities: List[Dict[str, str]] = []
+                    for item in parsed:
+                        if isinstance(item, dict) and item.get("name"):
+                            validated_entities.append(
+                                {
+                                    "name": str(item["name"]).strip(),
+                                    "type": str(item.get("type", "UNKNOWN")).strip(),
+                                    "description": str(
+                                        item.get("description", "")
+                                    ).strip(),
+                                }
+                            )
+                    return validated_entities
+        except Exception as e:
+            logger.warning(f"Failed to extract entities from text: {e}")
         return []
 
     async def write_entity(
@@ -308,21 +364,32 @@ class MemoryService:
             entities = await self.extract_entities(text_input, llm_instance)
             ids: List[str] = []
             for e in entities:
+                ent_name = e.get("name", "").strip()
+                if not ent_name:
+                    continue
+                ent_type = e.get("type", "UNKNOWN")
+                ent_desc = e.get("description", "")
                 res_id = await self.entity_vs.add_texts(
-                    [f"{e['name']} ({e['type']}): {e['description']}"],
+                    [f"{ent_name} ({ent_type}): {ent_desc}"],
                     [
                         {
-                            "name": e["name"],
-                            "type": e.get("type", "UNKNOWN"),
-                            "description": e.get("description", ""),
+                            "name": ent_name,
+                            "type": ent_type,
+                            "description": ent_desc,
                         }
                     ],
                 )
                 ids.extend(res_id)
             return ids
+
+        safe_name = name.strip()
+        if not safe_name:
+            return []
+        safe_type = entity_type.strip() or "UNKNOWN"
+        safe_desc = description.strip()
         return await self.entity_vs.add_texts(
-            [f"{name} ({entity_type}): {description}"],
-            [{"name": name, "type": entity_type, "description": description}],
+            [f"{safe_name} ({safe_type}): {safe_desc}"],
+            [{"name": safe_name, "type": safe_type, "description": safe_desc}],
         )
 
     async def read_entity(self, query: str, k: int = 5) -> str:
@@ -342,9 +409,23 @@ class MemoryService:
         description: str,
         thread_id: Optional[str] = None,
     ) -> str:
+        summary_model = AgentContextSummaryModel(
+            id=summary_id,
+            content=full_content,
+            embedding=json.dumps([]),
+            metadata_json=json.dumps(
+                {
+                    "summary": summary,
+                    "description": description,
+                    "thread_id": thread_id or "",
+                }
+            ),
+            created_at=datetime.now(timezone.utc),
+        )
+        await self.memory_repository.save_context_summary(summary_model)
+
         meta: Dict[str, Any] = {
             "id": summary_id,
-            "full_content": full_content,
             "summary": summary,
             "description": description,
         }
@@ -356,15 +437,16 @@ class MemoryService:
     async def read_summary_memory(
         self, summary_id: str, thread_id: Optional[str] = None
     ) -> str:
-        filters: Dict[str, Any] = {"id": summary_id}
-        if thread_id:
-            filters["thread_id"] = thread_id
-        results = await self.summary_vs.similarity_search(
-            summary_id, k=5, filter=filters
-        )
-        if not results:
-            return f"Summary {summary_id} not found."
-        return str(results[0].metadata.get("summary", "No summary content."))
+        record = await self.memory_repository.get_context_summary_by_id(summary_id)
+        if record:
+            try:
+                meta = json.loads(record.metadata_json or "{}")
+                if "summary" in meta:
+                    return str(meta["summary"])
+            except Exception:
+                pass
+            return str(record.content)
+        return f"Summary {summary_id} not found."
 
     async def read_conversations_by_summary_id(self, summary_id: str) -> str:
         rows = await self.memory_repository.get_messages_by_summary_id(summary_id)
@@ -419,7 +501,7 @@ async def summarise_context_window(
     raw_content = res.content if hasattr(res, "content") else res
     summary_text = _extract_text_content(raw_content)
 
-    summary_id = str(uuid.uuid4())[:8]
+    summary_id = str(uuid.uuid4())
     desc = f"Context summary for thread {thread_id or 'general'}"
     await memory_service.write_summary(
         summary_id, cleaned, summary_text, desc, thread_id=thread_id
@@ -436,10 +518,13 @@ async def summarize_conversation(
     if not rows:
         return {"status": "nothing_to_summarize"}
 
+    row_ids = [r.id for r in rows]
     transcript = "\n".join([r.content for r in rows])
     result = await summarise_context_window(
         transcript, memory_service, llm_instance, thread_id=thread_id
     )
     if result.get("status") != "nothing_to_summarize":
-        await memory_service.mark_as_summarized(thread_id, result["id"])
+        await memory_service.mark_as_summarized(
+            thread_id, result["id"], message_ids=row_ids
+        )
     return result

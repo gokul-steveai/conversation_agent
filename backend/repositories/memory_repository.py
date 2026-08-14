@@ -27,15 +27,28 @@ class MemoryRepository:
             await session.commit()
         return entry.id
 
-    async def mark_messages_summarized(self, thread_id: str, summary_id: str) -> None:
-        stmt = (
-            update(AgentConversationalHistoryModel)
-            .where(
-                AgentConversationalHistoryModel.thread_id == thread_id,
-                AgentConversationalHistoryModel.summary_id.is_(None),
+    async def mark_messages_summarized(
+        self, thread_id: str, summary_id: str, message_ids: Optional[List[str]] = None
+    ) -> None:
+        if message_ids:
+            stmt = (
+                update(AgentConversationalHistoryModel)
+                .where(
+                    AgentConversationalHistoryModel.thread_id == thread_id,
+                    AgentConversationalHistoryModel.id.in_(message_ids),
+                    AgentConversationalHistoryModel.summary_id.is_(None),
+                )
+                .values(summary_id=summary_id)
             )
-            .values(summary_id=summary_id)
-        )
+        else:
+            stmt = (
+                update(AgentConversationalHistoryModel)
+                .where(
+                    AgentConversationalHistoryModel.thread_id == thread_id,
+                    AgentConversationalHistoryModel.summary_id.is_(None),
+                )
+                .values(summary_id=summary_id)
+            )
         async with self.session_factory() as session:
             await session.execute(stmt)
             await session.commit()
@@ -69,6 +82,16 @@ class MemoryRepository:
             await session.commit()
         return summary_entry.id
 
+    async def get_context_summary_by_id(
+        self, summary_id: str
+    ) -> Optional[AgentContextSummaryModel]:
+        stmt = select(AgentContextSummaryModel).where(
+            AgentContextSummaryModel.id == summary_id
+        )
+        async with self.session_factory() as session:
+            res = await session.execute(stmt)
+            return res.scalar_one_or_none()
+
     async def get_unsummarized_messages(
         self, thread_id: str
     ) -> List[AgentConversationalHistoryModel]:
@@ -83,6 +106,23 @@ class MemoryRepository:
         async with self.session_factory() as session:
             res = await session.execute(stmt)
             return list(res.scalars().all())
+
+    async def get_recent_unsummarized_messages(
+        self, thread_id: str, limit: int = 10
+    ) -> List[AgentConversationalHistoryModel]:
+        stmt = (
+            select(AgentConversationalHistoryModel)
+            .where(
+                AgentConversationalHistoryModel.thread_id == thread_id,
+                AgentConversationalHistoryModel.summary_id.is_(None),
+            )
+            .order_by(AgentConversationalHistoryModel.timestamp.desc())
+            .limit(limit)
+        )
+        async with self.session_factory() as session:
+            res = await session.execute(stmt)
+            entries = list(res.scalars().all())
+            return list(reversed(entries))
 
     async def get_messages_by_summary_id(
         self, summary_id: str
