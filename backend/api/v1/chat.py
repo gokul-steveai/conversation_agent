@@ -9,7 +9,6 @@ from services.session_service import SessionService
 from utils.chat_utils import format_sse_event, resolve_chat_context
 from utils.logger import logger
 
-
 router = APIRouter(prefix="/chat", tags=["Chat & Agents"])
 
 
