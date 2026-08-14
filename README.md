@@ -7,12 +7,15 @@ An enterprise-grade, stateful **AI Chat Assistant** built with a decoupled **Fas
 ## 🌟 Key Features
 
 - **Decoupled System Architecture** — Clean separation of concerns between backend REST API (`FastAPI`) and glassmorphic frontend client (`Streamlit`).
+- **Pure Dependency Injection (Pure DI)** — Centralized FastAPI dependency container (`deps.py`) providing constructor injection across controllers, services, and repositories without internal fallbacks.
 - **Real-Time Token Streaming** — High-performance Server-Sent Events (SSE) streaming with live typewriter token rendering in the UI.
 - **Structured Prompt Evaluation** — Evaluates user queries using Groq structured output (`ChatDecision`) to determine search intent, user profile attributes, and clarification requirements.
 - **Autonomous Live Web Search** — Real-time web retrieval via Tavily API for news, current events, weather, facts, and post-cutoff knowledge.
+- **Enterprise Guardrails & Anti-Hallucination** — Universal temporal reasoning rules, automated JSON recovery, and persona guardrails against social media / website scraped boilerplates.
 - **Resilient Memory Engine** — Relational database tracking for chat history, user profiles, session states, and tool execution logs.
 - **Vector Memory Store** — Semantic vector storage (via HuggingFace MiniLM / open-source fallback embeddings) supporting knowledge base retrieval, context window summarization, and entity extraction.
 - **Security & Connection Hardening** — JWT authentication, SQLAlchemy connection pooling (`pool_pre_ping`, `pool_recycle`), CORS controls, and HTML output sanitization.
+
 
 ---
 
@@ -133,7 +136,8 @@ conversation_agent/
 │   ├── repositories/           # Data access layer (user, session, memory repos)
 │   ├── schemas/                # Pydantic validation schemas (StateUpdate, ChatDecision)
 │   ├── services/               # Business logic (search, memory, session, embeddings)
-│   └── utils/                  # Logger & text sanitizer utilities
+│   └── utils/                  # Reusable utilities (chat_utils, json_utils, text_utils, logger, sanitizer)
+
 │
 ├── frontend/                   # Streamlit Glassmorphism UI Client
 │   ├── app.py                  # Streamlit application entrypoint
