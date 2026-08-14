@@ -2,8 +2,6 @@ import json
 import uuid
 from typing import (
     Any,
-    AsyncContextManager,
-    Callable,
     Dict,
     List,
     Mapping,
@@ -13,30 +11,22 @@ from typing import (
 )
 
 import numpy as np
-from core.database import get_db
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from models.memory import BaseVectorModel
 from repositories.vector_store_repository import VectorStoreRepository
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class VectorStoreService:
     def __init__(
         self,
-        session_factory: Optional[
-            Callable[[], AsyncContextManager[AsyncSession]]
-        ] = None,
+        vector_repository: VectorStoreRepository,
         model_cls: Type[BaseVectorModel] = BaseVectorModel,
         embedding_function: Optional[Embeddings] = None,
-        vector_repository: Optional[VectorStoreRepository] = None,
     ) -> None:
-        self.session_factory = session_factory or get_db
+        self._vector_repository = vector_repository
         self.model_cls = model_cls
         self.embedding_function = embedding_function
-        self.vector_repository = vector_repository or VectorStoreRepository(
-            session_factory=self.session_factory
-        )
 
     async def add_texts(
         self,
@@ -84,7 +74,7 @@ class VectorStoreService:
             )
             records.append(record)
 
-        return await self.vector_repository.add_vector_records(records)
+        return await self._vector_repository.add_vector_records(records)
 
     async def similarity_search(
         self,
@@ -102,7 +92,7 @@ class VectorStoreService:
         query_norm = np.linalg.norm(query_embedding)
 
         candidate_limit = max(100, k * 10)
-        instances = await self.vector_repository.get_candidate_vector_records(
+        instances = await self._vector_repository.get_candidate_vector_records(
             self.model_cls, limit=candidate_limit
         )
 

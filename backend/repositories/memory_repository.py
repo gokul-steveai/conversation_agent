@@ -1,6 +1,5 @@
-from typing import AsyncContextManager, Callable, List, Optional
+from typing import List, Optional
 
-from core.database import get_db
 from models.memory import (
     AgentContextSummaryModel,
     AgentConversationalHistoryModel,
@@ -11,20 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class MemoryRepository:
-    def __init__(
-        self,
-        session_factory: Optional[
-            Callable[[], AsyncContextManager[AsyncSession]]
-        ] = None,
-    ) -> None:
-        self.session_factory = session_factory or get_db
+    def __init__(self, db_session: AsyncSession) -> None:
+        self._db_session = db_session
 
     async def save_conversational_history(
         self, entry: AgentConversationalHistoryModel
     ) -> str:
-        async with self.session_factory() as session:
-            session.add(entry)
-            await session.commit()
+        self._db_session.add(entry)
+        await self._db_session.flush()
         return entry.id
 
     async def mark_messages_summarized(
@@ -49,16 +42,13 @@ class MemoryRepository:
                 )
                 .values(summary_id=summary_id)
             )
-        async with self.session_factory() as session:
-            await session.execute(stmt)
-            await session.commit()
+        await self._db_session.execute(stmt)
 
     async def save_tool_execution_log(
         self, log_entry: AgentToolExecutionLogModel
     ) -> str:
-        async with self.session_factory() as session:
-            session.add(log_entry)
-            await session.commit()
+        self._db_session.add(log_entry)
+        await self._db_session.flush()
         return log_entry.id
 
     async def get_tool_execution_logs(
@@ -70,16 +60,14 @@ class MemoryRepository:
             .order_by(AgentToolExecutionLogModel.timestamp.desc())
             .limit(limit)
         )
-        async with self.session_factory() as session:
-            res = await session.execute(stmt)
-            return list(res.scalars().all())
+        res = await self._db_session.execute(stmt)
+        return list(res.scalars().all())
 
     async def save_context_summary(
         self, summary_entry: AgentContextSummaryModel
     ) -> str:
-        async with self.session_factory() as session:
-            session.add(summary_entry)
-            await session.commit()
+        self._db_session.add(summary_entry)
+        await self._db_session.flush()
         return summary_entry.id
 
     async def get_context_summary_by_id(
@@ -88,9 +76,8 @@ class MemoryRepository:
         stmt = select(AgentContextSummaryModel).where(
             AgentContextSummaryModel.id == summary_id
         )
-        async with self.session_factory() as session:
-            res = await session.execute(stmt)
-            return res.scalar_one_or_none()
+        res = await self._db_session.execute(stmt)
+        return res.scalar_one_or_none()
 
     async def get_unsummarized_messages(
         self, thread_id: str
@@ -103,9 +90,8 @@ class MemoryRepository:
             )
             .order_by(AgentConversationalHistoryModel.timestamp.asc())
         )
-        async with self.session_factory() as session:
-            res = await session.execute(stmt)
-            return list(res.scalars().all())
+        res = await self._db_session.execute(stmt)
+        return list(res.scalars().all())
 
     async def get_recent_unsummarized_messages(
         self, thread_id: str, limit: int = 10
@@ -119,10 +105,9 @@ class MemoryRepository:
             .order_by(AgentConversationalHistoryModel.timestamp.desc())
             .limit(limit)
         )
-        async with self.session_factory() as session:
-            res = await session.execute(stmt)
-            entries = list(res.scalars().all())
-            return list(reversed(entries))
+        res = await self._db_session.execute(stmt)
+        entries = list(res.scalars().all())
+        return list(reversed(entries))
 
     async def get_messages_by_summary_id(
         self, summary_id: str
@@ -132,6 +117,5 @@ class MemoryRepository:
             .where(AgentConversationalHistoryModel.summary_id == summary_id)
             .order_by(AgentConversationalHistoryModel.timestamp.asc())
         )
-        async with self.session_factory() as session:
-            res = await session.execute(stmt)
-            return list(res.scalars().all())
+        res = await self._db_session.execute(stmt)
+        return list(res.scalars().all())

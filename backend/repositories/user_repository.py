@@ -1,66 +1,55 @@
 from typing import Optional
 
-from core.database import get_db
 from models import UserModel
+from repositories.base_repository import BaseRepository
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from utils import logger
 
 
-class UserRepository:
-    @classmethod
-    async def find_by_id(cls, user_id: str) -> Optional[UserModel]:
-        async with get_db() as db:
-            result = await db.execute(select(UserModel).filter(UserModel.id == user_id))
-            return result.scalars().first()
+class UserRepository(BaseRepository[UserModel]):
+    def __init__(self, db_session: AsyncSession):
+        super().__init__(db_session=db_session, model_cls=UserModel)
 
-    @classmethod
-    async def find_by_email(cls, email: str) -> Optional[UserModel]:
-        async with get_db() as db:
-            result = await db.execute(
-                select(UserModel).filter(UserModel.email == email.strip().lower())
-            )
-            return result.scalars().first()
+    async def find_by_email(self, email: str) -> Optional[UserModel]:
+        result = await self._session.execute(
+            select(UserModel).filter(UserModel.email == email.strip().lower())
+        )
+        return result.scalars().first()
 
-    @classmethod
     async def create_user(
-        cls,
+        self,
         user_id: str,
         name: str,
         email: str,
         password_hash: str,
     ) -> UserModel:
-        async with get_db() as db:
-            user = UserModel(
-                id=user_id,
-                name=name.strip(),
-                email=email.strip().lower(),
-                password_hash=password_hash,
-                is_active=True,
-            )
-            db.add(user)
-            logger.info(
-                f"Created new registered user record: {user.email} (ID: {user_id})"
-            )
-            return user
+        user = UserModel(
+            id=user_id,
+            name=name.strip(),
+            email=email.strip().lower(),
+            password_hash=password_hash,
+            is_active=True,
+        )
+        await self.create_entity(user)
+        logger.info(f"Created new registered user record: {user.email} (ID: {user_id})")
+        return user
 
-    @classmethod
     async def get_or_create_user(
-        cls,
+        self,
         user_id: str,
         name: str = "Default User",
         email: str = "user@example.com",
     ) -> UserModel:
-        async with get_db() as db:
-            result = await db.execute(select(UserModel).filter(UserModel.id == user_id))
-            user = result.scalars().first()
-            if not user:
-                user = UserModel(
-                    id=user_id,
-                    name=name,
-                    email=email.lower(),
-                    password_hash="placeholder_hash",
-                    is_active=True,
-                )
-                db.add(user)
-                logger.info(f"Created default user record: {user_id}")
-            return user
+        user = await self.find_by_id(user_id)
+        if not user:
+            user = UserModel(
+                id=user_id,
+                name=name,
+                email=email.lower(),
+                password_hash="placeholder_hash",
+                is_active=True,
+            )
+            await self.create_entity(user)
+            logger.info(f"Created default user record: {user_id}")
+        return user

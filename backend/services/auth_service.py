@@ -13,10 +13,14 @@ from schemas import (
     UserRegisterRequest,
     UserResponse,
 )
-from utils import format_validation_error, logger
+from utils.logger import logger
+from utils.sanitizer import format_validation_error
 
 
 class AuthService:
+    def __init__(self, user_repo: UserRepository):
+        self.user_repo = user_repo
+
     @staticmethod
     def hash_password(password: str) -> str:
         salt = bcrypt.gensalt()
@@ -63,30 +67,29 @@ class AuthService:
             logger.warning(f"Invalid JWT Token: {e}")
             return None
 
-    @classmethod
-    async def register_user(cls, request: UserRegisterRequest) -> AuthResponse:
+    async def register_user(self, request: UserRegisterRequest) -> AuthResponse:
         try:
             email = request.email.strip().lower()
             name = request.name.strip()
 
-            existing = await UserRepository.find_by_email(email)
+            existing = await self.user_repo.find_by_email(email)
             if existing:
                 return AuthResponse(
                     success=False,
                     error=f"An account with email '{email}' already exists.",
                 )
 
-            password_hash = cls.hash_password(request.password)
+            password_hash = self.hash_password(request.password)
             user_id = str(uuid.uuid4())
 
-            user = await UserRepository.create_user(
+            user = await self.user_repo.create_user(
                 user_id=user_id,
                 name=name,
                 email=email,
                 password_hash=password_hash,
             )
 
-            token = cls.create_access_token(
+            token = self.create_access_token(
                 user_id=user.id, email=user.email, name=user.name
             )
             user_resp = UserResponse(
@@ -101,18 +104,17 @@ class AuthService:
             logger.error(f"Error during registration: {e}")
             return AuthResponse(success=False, error="An internal error occurred.")
 
-    @classmethod
-    async def authenticate_user(cls, request: UserLoginRequest) -> AuthResponse:
+    async def authenticate_user(self, request: UserLoginRequest) -> AuthResponse:
         try:
             email = request.email.strip().lower()
-            user = await UserRepository.find_by_email(email)
+            user = await self.user_repo.find_by_email(email)
             if not user:
                 return AuthResponse(success=False, error="Invalid email or password.")
 
-            if not cls.verify_password(request.password, user.password_hash):
+            if not self.verify_password(request.password, user.password_hash):
                 return AuthResponse(success=False, error="Invalid email or password.")
 
-            token = cls.create_access_token(
+            token = self.create_access_token(
                 user_id=user.id, email=user.email, name=user.name
             )
             user_resp = UserResponse(
